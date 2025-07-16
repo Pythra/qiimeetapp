@@ -1,0 +1,24 @@
+# Ignore backend and admin projects
+backend/
+admin/
+
+# Ignore node_modules outside your Expo project
+node_modules/ 
+frontend/Qiimeet/node_modules/
+
+# Ignore build artifacts, logs, and caches
+*.log
+*.tmp
+*.cache
+*.DS_Store
+
+# Ignore test and uploads folders if not needed
+**/test/
+**/uploads/
+
+# Ignore git and version control
+.git/
+.gitignore
+
+# Ignore Python files if not needed
+**/*.py 
