@@ -8,9 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
-
-# Native
-android/
+ 
 ios/
 .kotlin/
 *.orig.*
@@ -21,8 +19,7 @@ ios/
 *.mobileprovision
 
 # Firebase / Google Cloud secrets
-*.json
-!app.json     # <-- allow this one if you need app.json in Git
+*.json 
 
 # Metro
 .metro-health-check*
