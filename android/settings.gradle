@@ -37,3 +37,8 @@ expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
 includeBuild(expoAutolinking.reactNativeGradlePlugin)
+
+// Set environment variable to use community autolinking
+System.setProperty('EXPO_USE_COMMUNITY_AUTOLINKING', '1')
+
+
