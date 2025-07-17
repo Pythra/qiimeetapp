@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000', 
-    paddingTop:32
+    paddingTop:24
   }, 
   backIcon: {
     width: 24,
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: '400',
     fontFamily: 'FONTS.regular',
-    marginBottom: 44,
+    marginBottom: 24,
     opacity: 0.8,
   },
   time: {
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     position: 'absolute',
-    bottom: 122
+    bottom: 110
    },
    modalOverlay: {
     flex: 1,
@@ -246,17 +246,19 @@ const styles = StyleSheet.create({
   modalTitle: {
     color: '#FFFFFF',
     fontSize: 24,
-    fontWeight:600,
+    fontWeight:'600',
     textAlign: 'center',
+    marginBottom:12,
     lineHeight: 32, 
     fontFamily: FONTS.regular,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12
+    ,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   modalButton: {
     paddingVertical: 12,
@@ -274,14 +276,14 @@ const styles = StyleSheet.create({
   },
   modalButtonTextCancel: {
     color: '#ec066a',
-    fontWeight:600,
+    fontWeight:'600',
     fontSize: 24,
     fontFamily: FONTS.regular,
   },
   modalButtonTextConfirm: {
     color: '#FFFFFF',
     fontSize: 24,
-    fontWeight:600,
+    fontWeight:'600',
     fontFamily: FONTS.regular,
   },
 });

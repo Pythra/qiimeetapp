@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-    paddingTop: getResponsiveSpacing(40, 60),
+    paddingTop: 24,
     
     marginBottom:90
   },

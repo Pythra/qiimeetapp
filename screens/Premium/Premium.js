@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
   balanceAmount: {
     color: '#fff',
     fontSize: 24,
-    fontWeight:600, 
+    fontWeight:'600', 
   },
   premiumSection: {
     marginTop: getResponsiveSpacing(10, 15),
@@ -446,8 +446,7 @@ const styles = StyleSheet.create({
   },
   subscribeText: {
     color: '#fff',
-    fontSize: getResponsiveFontSize(24),
-    fontFamily: FONTS.medium,
+    fontSize: getResponsiveFontSize(24), 
     fontWeight: '700',
   },
   featuresContainer: {
@@ -463,9 +462,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: getResponsiveFontSize(24),
-    fontFamily: FONTS.medium,
-    fontWeight:600,
+    fontSize: getResponsiveFontSize(24), 
+    fontWeight: '600',
     alignSelf: 'center',
     marginBottom: 16,
   },
@@ -529,7 +527,7 @@ const styles = StyleSheet.create({
   allFeaturesText: {
     color: '#ec066a',
     fontSize: 24,
-     fontWeight: '700',
+    fontWeight: '700',
     textAlign: 'center',
     marginTop: getResponsiveSpacing(5, 10),
   },

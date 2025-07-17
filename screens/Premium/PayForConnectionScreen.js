@@ -59,7 +59,8 @@ const PayForConnectionScreen = ({ navigation }) => {
   const [userBalance, setUserBalance] = useState(0);
   const [allowedConnections, setAllowedConnections] = useState(0);
   const [usedConnections, setUsedConnections] = useState(0);
-  const [remainingConnections, setRemainingConnections] = useState(3);
+  const [remainingConnections, setRemainingConnections] = useState(0);
+  const [availableConnectionsLeftToBuy, setAvailableConnectionsLeftToBuy] = useState(3);
   const [loading, setLoading] = useState(true);
   const [insufficientBalanceModalVisible, setInsufficientBalanceModalVisible] = useState(false);
   const [requiredAmount, setRequiredAmount] = useState(0);
@@ -87,16 +88,15 @@ const PayForConnectionScreen = ({ navigation }) => {
           }
         });
         setAllowedConnections(userRes.data.allowedConnections || 0);
-        // Calculate usedConnections: accepted + pending
-        const accepted = Array.isArray(userRes.data.connections) ? userRes.data.connections.length : 0;
-        console.log(accepted);
-        const pending = Array.isArray(userRes.data.requests) ? userRes.data.requests.length : 0;
-        setUsedConnections(accepted + pending);
-        setRemainingConnections(userRes.data.remainingConnections ?? (3 - (userRes.data.allowedConnections || 0)));
+        setUsedConnections(userRes.data.usedConnections || 0);
+        setRemainingConnections(userRes.data.remainingConnections || 0);
+        setAvailableConnectionsLeftToBuy(userRes.data.availableConnectionsLeftToBuy ?? 3);
       } catch (error) {
         setUserBalance(0);
         setAllowedConnections(0);
-        setRemainingConnections(3);
+        setUsedConnections(0);
+        setRemainingConnections(0);
+        setAvailableConnectionsLeftToBuy(3);
       } finally {
         setLoading(false);
       }
@@ -151,9 +151,9 @@ const PayForConnectionScreen = ({ navigation }) => {
     let connectionsToAdd = 1;
     if (selectedPlan.title === 'Two Connections') connectionsToAdd = 2;
     if (selectedPlan.title === 'Three Connections') connectionsToAdd = 3;
-    // Only allow up to remainingConnections
-    if (connectionsToAdd > remainingConnections) {
-      alert(`You can only purchase up to ${remainingConnections} more connection(s).`);
+    // Only allow up to availableConnectionsLeftToBuy
+    if (connectionsToAdd > availableConnectionsLeftToBuy) {
+      alert(`You can only purchase up to ${availableConnectionsLeftToBuy} more connection(s).`);
       return;
     }
     if (userBalance < price) {
@@ -182,6 +182,7 @@ const PayForConnectionScreen = ({ navigation }) => {
         setUserBalance(response.data.balance);
         setAllowedConnections(response.data.allowedConnections);
         setRemainingConnections(response.data.remainingConnections);
+        setAvailableConnectionsLeftToBuy(response.data.availableConnectionsLeftToBuy);
         navigation.navigate('PremiumScreen', {
           amountPaid: price,
           fromConnection: true,
@@ -215,8 +216,8 @@ const PayForConnectionScreen = ({ navigation }) => {
           let connectionsForOption = 1;
           if (option.title === 'Two Connections') connectionsForOption = 2;
           if (option.title === 'Three Connections') connectionsForOption = 3;
-          // Disable if buying this option would make allowedConnections exceed 3
-          const disabled = (allowedConnections + connectionsForOption) > 3;
+          // Disable if buying this option would make allowedConnections exceed 3 or availableConnectionsLeftToBuy is less than needed
+          const disabled = (connectionsForOption > availableConnectionsLeftToBuy) || (allowedConnections + connectionsForOption > 3);
           return (
             <TouchableOpacity 
               key={idx}
@@ -235,13 +236,18 @@ const PayForConnectionScreen = ({ navigation }) => {
               <Text style={styles.optionDescription}>{option.description}</Text>
               {disabled && (
                 <Text style={{ color: '#ec066a', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
-                  Not available (max 3 connections)
+                  Not available (max {availableConnectionsLeftToBuy} left to buy)
                 </Text>
               )}
             </TouchableOpacity>
           );
         })}
       </ScrollView>
+      {availableConnectionsLeftToBuy === 0 && (
+        <Text style={{ color: '#ec066a', fontSize: 14, textAlign: 'center', marginTop: 12 }}>
+          You have reached the maximum number of connections you can buy.
+        </Text>
+      )}
     </View>
   );
 
@@ -285,7 +291,7 @@ const PayForConnectionScreen = ({ navigation }) => {
         <TouchableOpacity 
           style={styles.continueButton}
           onPress={handleContinue}
-          disabled={loading || remainingConnections === 0}
+          disabled={loading || availableConnectionsLeftToBuy === 0}
         >
           <Text style={styles.continueButtonText}>Continue</Text>
         </TouchableOpacity>
@@ -306,7 +312,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingTop: 42,
+    paddingTop: 8,
   },
   header: {
     flexDirection: 'row',

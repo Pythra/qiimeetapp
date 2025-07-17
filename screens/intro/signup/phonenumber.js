@@ -15,24 +15,10 @@ export function formatPhoneNumber(number) {
 
 export async function sendOTP(phoneNumber) {
   try {
-    const url = 'https://api.ng.termii.com/api/sms/otp/send';
-    const payload = {
-      api_key: 'TLaoOhDNJhrangBPuKfzEtMHjPFbVUOWXyozycKuuNbGcGinofhPGBGqggUXCa',
-      message_type: 'NUMERIC',
-      to: `234${phoneNumber}`,
-      from: 'N-Alert',
-      channel: 'dnd',
-      pin_attempts: 10,
-      pin_time_to_live: 5,
-      pin_length: 6,
-      pin_placeholder: '< 1234 >',
-      message_text: 'Your Qiimeet authentication pin is < 1234 >. It expires in 10 minutes',
-      pin_type: 'NUMERIC',
-    };
-    const response = await fetch(url, {
+    const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ phoneNumber }),
     });
     const data = await response.json();
     return data;

@@ -1,7 +1,8 @@
 export const FONTS = {
   regular: 'PlusJakartaSans-Regular',
   semiBold: 'PlusJakartaSans-SemiBold',
-  bold: 'PlusJakartaSans-Bold'
+  bold: 'PlusJakartaSans-Bold',
+  medium: 'PlusJakartaSans-SemiBold', // Added medium alias
 };
 
 export const fontPaths = {

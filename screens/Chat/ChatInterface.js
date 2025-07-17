@@ -1041,9 +1041,10 @@ const styles = StyleSheet.create({
   },
   name: {
     color: '#fff',
-    fontWeight: 'bold',
+    // fontWeight: 'bold', // commented out
     fontSize: 17,
     marginRight: 4,
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   headerIcon: {
     marginLeft: 24,
@@ -1085,6 +1086,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
     paddingHorizontal: 12,
     paddingBottom: -8,
+    marginBottom: 16,
   },
   inputRow: {
     flexDirection: 'row',
@@ -1157,7 +1159,7 @@ const styles = StyleSheet.create({
   menuText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '400',
+    // fontWeight: '400', // commented out
   },
   menuOverlay: {
     position: 'absolute',
@@ -1195,10 +1197,14 @@ const styles = StyleSheet.create({
   sentText: {
     color: '#fff',
     fontSize: 16,
+    // fontWeight: 'bold', // commented out if present
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   receivedText: {
     color: '#121212',
     fontSize: 16,
+    // fontWeight: 'bold', // commented out if present
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   sentTimeContainer: {
     flexDirection: 'row',
@@ -1232,6 +1238,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginRight: 8,
     fontStyle: 'italic',
+    // fontWeight: 'bold', // commented out if present
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   // Emoji picker styles
   emojiPicker: {
@@ -1260,10 +1268,11 @@ const styles = StyleSheet.create({
   emojiCategoryText: {
     color: '#bbb',
     fontSize: 12,
-    fontWeight: '500',
+    // fontWeight: '500', // commented out
   },
   emojiCategoryTextActive: {
     color: '#ff2d7a',
+    // fontWeight: '500', // commented out
   },
   emojiGrid: {
     flex: 1,
@@ -1312,7 +1321,7 @@ const styles = StyleSheet.create({
   callModalText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '500',
+    // fontWeight: '500', // commented out
   },
   plusModal: {
     position: 'absolute',
@@ -1338,6 +1347,6 @@ const styles = StyleSheet.create({
   plusModalText: {
     color: '#fff',
     fontSize: 15,
-    fontWeight: '500',
+    // fontWeight: '500', // commented out
   },
 });

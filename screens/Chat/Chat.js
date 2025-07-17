@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212', // dark background
-    paddingTop: 24,
+    paddingTop: 40,
     paddingHorizontal: 24,
     marginBottom:56
   },
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: '#fff',
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: 'bold', // commented out
   },
   messageLabel: {
     color: '#fff',
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   testButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    // fontWeight: '600', // commented out
   },
   chatItem: {
     flexDirection: 'row',
@@ -239,10 +239,11 @@ const styles = StyleSheet.create({
   },
   name: {
     color: '#fff',
-    fontWeight: 'bold',
+    // fontWeight: 'bold', // commented out
     fontSize: 16,
     marginRight: 6,
     textTransform:'capitalize'
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   verifiedBadge: {
     marginTop: 2,
@@ -256,7 +257,7 @@ const styles = StyleSheet.create({
   message: {
     color: '#bbb',
     fontSize: 16,
-    fontWeight:400,
+    fontWeight:'400',
     marginTop: 16,
   },
   olderHeader: {
@@ -305,7 +306,7 @@ const styles = StyleSheet.create({
   },
   suggestionsLabel: {
     color: '#fff',
-    fontWeight: '600',
+    // fontWeight: '600', // commented out
     fontSize: 16,
     marginBottom: 10,
     marginLeft: 2,
@@ -335,6 +336,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 60,
     opacity: 0.8,
+    // fontFamily: 'YourFontFamily', // commented out if present
   },
   bottomNav: {
     flexDirection: 'row',
