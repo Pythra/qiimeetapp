@@ -58,12 +58,27 @@ const verifyOTP = async () => {
     return;
   }
   setIsVerifying(true);
-  // Bypass backend verification for testing
-  await AsyncStorage.setItem('token', 'dummy-token');
-  if (route.params && route.params.fromSignIn) {
-    navigation.navigate('MainTabs');
-  } else {
-    navigation.navigate('Welcome');
+  try {
+    // Call backend to register phone number
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: phoneNumber }),
+    });
+    const data = await response.json();
+    if (data.token) {
+      await AsyncStorage.setItem('token', data.token);
+      if (route.params && route.params.fromSignIn) {
+        navigation.navigate('MainTabs');
+      } else {
+        navigation.navigate('Welcome');
+      }
+    } else {
+      setError(data.error || 'Failed to save phone number.');
+    }
+  } catch (err) {
+    console.error('Register error:', err);
+    setError('Failed to save phone number.');
   }
   setIsVerifying(false);
 };
@@ -73,29 +88,10 @@ const handleResendCode = async () => {
   if (!canResend || isResending) return;
   setIsResending(true);
   setError('');
-  
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber }),
-    });
-    
-    const data = await response.json();
-    
-    if (data.success && data.pinId) {
-      await AsyncStorage.setItem('pinId', data.pinId);
-      setCountdown(40);
-      setCanResend(false);
-      Alert.alert('Success', 'New verification code sent!');
-    } else {
-      Alert.alert('Error', data.error || 'Failed to resend code');
-    }
-  } catch (error) {
-    console.error('Resend error:', error);
-    Alert.alert('Error', 'Failed to resend code');
-  }
-  
+  // Bypass backend call for testing
+  setCountdown(40);
+  setCanResend(false);
+  Alert.alert('Success', 'New verification code sent!');
   setIsResending(false);
 };
 

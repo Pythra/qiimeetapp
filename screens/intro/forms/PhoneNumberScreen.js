@@ -261,7 +261,11 @@ const PhoneNumberScreen = ({ navigation }) => {
 
   const handleNext = async () => {
     if (phoneNumber.length === 10) {
-      await sendOTP(phoneNumber);
+      // Bypass OTP sending for testing
+      navigation.navigate('Auth', {
+        screen: 'VerificationCode',
+        params: { phoneNumber, pinId: 'dummy-pin-id' },
+      });
     }
   };
 
