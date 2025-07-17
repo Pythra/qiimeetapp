@@ -2,10 +2,6 @@
 backend/
 admin/
 
-# Ignore native folders to use CNG/Prebuild configuration
-android/
-ios/
-
 # Ignore node_modules outside your Expo project
 node_modules/ 
 frontend/Qiimeet/node_modules/
