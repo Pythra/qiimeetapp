@@ -52,34 +52,11 @@ export function usePhoneNumber(navigation) {
   // Only register phone number and save token, no OTP/verification
   const handleNext = async () => {
     if (phoneNumber.length === 10) {
-      try {
-        // Fetch all users from admin endpoint
-        const usersRes = await fetch(`${API_BASE_URL}/admin/users`);
-        const usersData = await usersRes.json();
-        if (usersData.success && Array.isArray(usersData.users)) {
-          const exists = usersData.users.some(
-            user => (user.phoneNumber || '').replace(/^0/, '') === phoneNumber
-          );
-          if (exists) {
-            Alert.alert('Error', 'Phone number already exists. Please use a different number.');
-            return;
-          }
-        }
-        // If not exists, send OTP
-        const otpResult = await sendOTP(phoneNumber);
-        if (otpResult.pinId) {
-          await AsyncStorage.setItem('pinId', otpResult.pinId);
-          navigation.navigate('Auth', {
-            screen: 'VerificationCode',
-            params: { phoneNumber, pinId: otpResult.pinId },
-          });
-        } else {
-          Alert.alert('Error', otpResult.message || 'Failed to send OTP');
-        }
-      } catch (err) {
-        console.log('OTP send error:', err);
-        Alert.alert('Error', 'Failed to send OTP');
-      }
+      // Skip OTP sending for testing
+      navigation.navigate('Auth', {
+        screen: 'VerificationCode',
+        params: { phoneNumber, pinId: 'dummy-pin-id' },
+      });
     }
   };
 

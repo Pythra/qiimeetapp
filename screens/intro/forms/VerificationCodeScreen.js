@@ -58,32 +58,12 @@ const verifyOTP = async () => {
     return;
   }
   setIsVerifying(true);
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        pinId, 
-        pin: code, 
-        phoneNumber 
-      }),
-    });
-    
-    const data = await response.json();
-    
-    if (data.success && data.token) {
-      await AsyncStorage.setItem('token', data.token);
-      if (route.params && route.params.fromSignIn) {
-        navigation.navigate('MainTabs');
-      } else {
-        navigation.navigate('Welcome');
-      }
-    } else {
-      setError(data.error || 'Verification failed. Please try again.');
-    }
-  } catch (error) {
-    console.error('Verification error:', error);
-    setError('Verification failed. Please try again.');
+  // Bypass backend verification for testing
+  await AsyncStorage.setItem('token', 'dummy-token');
+  if (route.params && route.params.fromSignIn) {
+    navigation.navigate('MainTabs');
+  } else {
+    navigation.navigate('Welcome');
   }
   setIsVerifying(false);
 };
