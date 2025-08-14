@@ -1,16 +1,110 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, Pressable } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
 import { MaterialIcons } from '@expo/vector-icons';
 import ConnectionPolicyModal from './ConnectionPolicyModal';
-import { DUMMY_PROFILES } from '../../constants/dummyData';
+import { useAuth } from '../../components/AuthContext';
+import { API_BASE_URL } from '../../env';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PastConnections = ({ navigation }) => {
+  const { user: currentUser, allUsers, updateUser, getProfileImageSource } = useAuth();
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [policyModalVisible, setPolicyModalVisible] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
+  const [pastConnections, setPastConnections] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Calculate age from dateOfBirth
+  const calculateAge = (dateOfBirth) => {
+    if (!dateOfBirth) return null;
+    
+    const birthDate = new Date(dateOfBirth);
+    const today = new Date();
+    
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    return age;
+  };
+
+  const fetchPastConnections = async (isRefreshing = false) => {
+    try {
+      if (isRefreshing) {
+        setRefreshing(true);
+      }
+      
+      if (!currentUser) return;
+      
+      // Get past connections from user data
+      const pastConnectionsIds = currentUser.pastConnections || [];
+      
+      if (pastConnectionsIds.length > 0) {
+        let allUsersData = [];
+        
+        // Use AuthContext allUsers data if available
+        if (allUsers && allUsers.length > 0) {
+          allUsersData = allUsers;
+        } else {
+          // Fetch all users with complete data only if not available in context
+          const token = await AsyncStorage.getItem('token');
+          if (!token) throw new Error('No token');
+          
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const allUsersResponse = await allUsersRes.json();
+          allUsersData = allUsersResponse.users || [];
+        }
+        
+        // Map past connection IDs to complete user data
+        const completePastConnections = pastConnectionsIds.map(connectionId => {
+          const completeUser = allUsersData.find(user => user._id === connectionId);
+          return completeUser || { _id: connectionId }; // Fallback to basic object if not found
+        }).filter(Boolean);
+        
+        setPastConnections(completePastConnections);
+      } else {
+        setPastConnections([]);
+      }
+    } catch (err) {
+      console.error('Error fetching past connections:', err);
+      setPastConnections([]);
+    } finally {
+      if (isRefreshing) {
+        setRefreshing(false);
+      }
+    }
+  };
+
+  const onRefresh = React.useCallback(() => {
+    console.log('Pull to refresh triggered for past connections');
+    fetchPastConnections(true);
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    if (currentUser) {
+      fetchPastConnections();
+    }
+  }, [currentUser]);
+
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('PastConnections screen focused - refreshing data');
+      if (currentUser) {
+        fetchPastConnections();
+      }
+    }, [currentUser])
+  );
 
   const handleDelete = (connection) => {
     setSelectedConnection(connection);
@@ -29,33 +123,56 @@ const PastConnections = ({ navigation }) => {
         onBack={() => navigation.goBack()}
       />
 
-      <ScrollView style={styles.connectionsList} showsVerticalScrollIndicator={false}>
-        {DUMMY_PROFILES.slice(-4).map((connection) => (
-          <View key={connection.id} style={styles.connectionCard}>
-            <Image source={connection.image} style={styles.userImage} />
-            <View style={styles.userInfo}>
-              <View style={styles.nameContainer}>
-                <Text style={styles.userName}>{connection.name}, {connection.age}</Text>
-                <MaterialIcons name="verified" size={16} color="#EC066A" style={styles.verifiedIcon} />
-              </View>
-              <Text style={styles.userLocation}>{connection.distance}</Text>
-              <View style={styles.actions}>
-                <TouchableOpacity 
-                  style={styles.connectButton}
-                  onPress={() => handleConnect(connection)}
-                >
-                  <Text style={styles.connectText}>Connect</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.deleteButton}
-                  onPress={() => handleDelete(connection)}
-                >
-                  <Text style={styles.deleteText}>Delete</Text>
-                </TouchableOpacity>
+      <ScrollView style={styles.connectionsList} showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            tintColor="#ec066a"
+            colors={["#ec066a"]}
+          />
+        }
+      >
+        {pastConnections.length > 0 ? (
+          pastConnections.map((connection) => (
+            <View key={connection._id} style={styles.connectionCard}>
+              <Image source={getProfileImageSource(connection)} style={styles.userImage} />
+              <View style={styles.userInfo}>
+                <View style={styles.nameContainer}>
+                  <Text style={styles.userName}>
+                    {connection.username || connection.name || connection.phone || 'User'}
+                    {connection.age || calculateAge(connection.dateOfBirth) ? `, ${connection.age || calculateAge(connection.dateOfBirth)}` : ''}
+                  </Text>
+                  {connection.verificationStatus === 'true' && (
+                    <MaterialIcons name="verified" size={16} color="#EC066A" style={styles.verifiedIcon} />
+                  )}
+                </View>
+                <Text style={styles.userLocation}>{connection.location || ''}</Text>
+                <View style={styles.actions}>
+                  <TouchableOpacity 
+                    style={styles.connectButton}
+                    onPress={() => handleConnect(connection)}
+                  >
+                    <Text style={styles.connectText}>Connect</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.deleteButton}
+                    onPress={() => handleDelete(connection)}
+                  >
+                    <Text style={styles.deleteText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>No past connections found</Text>
+            <Text style={styles.emptyStateSubtext}>
+              Past connections will appear here when you have previous connections that were ended.
+            </Text>
           </View>
-        ))}
+        )}
       </ScrollView>
 
       {/* Delete Confirmation Modal */}
@@ -244,6 +361,27 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
     fontFamily: FONTS.regular,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  emptyStateText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    fontFamily: FONTS?.medium || 'System',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  emptyStateSubtext: {
+    color: '#888',
+    fontSize: 16,
+    fontFamily: FONTS?.regular || 'System',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
 });
 

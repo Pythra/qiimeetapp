@@ -12,3 +12,21 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# Keep network-related classes
+-keep class com.facebook.react.modules.network.** { *; }
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+
+# Keep React Native Image components
+-keep class com.facebook.react.views.image.** { *; }
+-keep class com.facebook.drawee.** { *; }
+-keep class com.facebook.imagepipeline.** { *; }
+
+# Keep CloudFront and network URLs
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# Keep network security config
+-keep class android.security.NetworkSecurityPolicy { *; }

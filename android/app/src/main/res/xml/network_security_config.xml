@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">qiimeet-backend.fly.dev</domain>
+        <domain includeSubdomains="true">d11n4tndq0o4wh.cloudfront.net</domain>
+        <domain includeSubdomains="true">clerk.accounts.dev</domain>
+        <domain includeSubdomains="true">api.clerk.dev</domain>
+        <domain includeSubdomains="true">accounts.clerk.dev</domain>
+    </domain-config>
+    
+    <!-- Allow cleartext traffic for development -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

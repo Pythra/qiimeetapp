@@ -1,6 +1,6 @@
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE_URL } from '../frontend.env.js';
+import { API_BASE_URL } from '../env.js';
 
 class SocketManager {
   constructor() {
@@ -20,7 +20,6 @@ class SocketManager {
 
   async connect() {
     if (this.isConnecting || this.isConnected) {
-      console.log('Socket already connecting or connected');
       return;
     }
 
@@ -40,7 +39,7 @@ class SocketManager {
       
       this.socket = io(socketUrl, {
         auth: { token },
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'], // Allow fallback to polling
         forceNew: false, // Allow reuse of existing connections
         timeout: 30000, // Increased timeout
         reconnection: false, // We'll handle reconnection manually
@@ -50,6 +49,8 @@ class SocketManager {
         maxReconnectionAttempts: 0,
         pingTimeout: 60000, // 60 seconds ping timeout
         pingInterval: 25000, // 25 seconds ping interval
+        upgrade: true, // Allow transport upgrade
+        rememberUpgrade: true, // Remember transport upgrade
       });
 
       this.setupEventListeners();
@@ -59,6 +60,9 @@ class SocketManager {
       if (this.userId) {
         this.joinUserRoom(this.userId);
       }
+      
+      // Debug: Log connection status
+      console.log('[SocketManager] Connected successfully. UserId:', this.userId);
 
     } catch (error) {
       console.error('Error connecting to socket:', error);
@@ -79,6 +83,12 @@ class SocketManager {
       this.clearConnectionTimeout();
       this.startHeartbeat();
       this.rejoinRooms();
+      
+      // Ensure user room is joined after connection
+      if (this.userId) {
+        console.log('[SocketManager] Ensuring user room is joined after connection');
+        this.joinUserRoom(this.userId);
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -97,18 +107,13 @@ class SocketManager {
       console.error('Socket connection error:', error);
       this.isConnected = false;
       this.isConnecting = false;
-      this.clearConnectionTimeout();
       this.handleConnectionError();
     });
 
+    // Add error event listener
     this.socket.on('error', (error) => {
       console.error('Socket error:', error);
       this.handleConnectionError();
-    });
-
-    // Listen for pong responses
-    this.socket.on('pong', () => {
-      console.log('Received pong from server');
     });
   }
 
@@ -190,12 +195,38 @@ class SocketManager {
     }, delay);
   }
 
+  // Enhanced rejoin rooms method
   rejoinRooms() {
-    // Rejoin any rooms that were active before disconnection
-    // This will be called after successful reconnection
-    console.log('Rejoining rooms after reconnection');
+    console.log('[SocketManager] Rejoining rooms after reconnection');
     if (this.activeChatId) {
       this.joinChat(this.activeChatId);
+    }
+    if (this.userId) {
+      console.log('[SocketManager] Rejoining user room after reconnection');
+      this.joinUserRoom(this.userId);
+    }
+  }
+
+  // Force rejoin user room - useful for ensuring room membership
+  forceRejoinUserRoom() {
+    if (this.userId && this.socket && this.isConnected) {
+      console.log('[SocketManager] Force rejoining user room:', this.userId);
+      this.socket.emit('join_user_room', this.userId);
+      
+      // Verify room join multiple times to ensure reliability
+      setTimeout(() => {
+        if (this.socket && this.isConnected) {
+          console.log('[SocketManager] Verifying user room join (1s delay)');
+          this.socket.emit('join_user_room', this.userId);
+        }
+      }, 1000);
+      
+      setTimeout(() => {
+        if (this.socket && this.isConnected) {
+          console.log('[SocketManager] Verifying user room join (3s delay)');
+          this.socket.emit('join_user_room', this.userId);
+        }
+      }, 3000);
     }
   }
 
@@ -235,7 +266,10 @@ class SocketManager {
   onTyping(callback) {
     if (this.socket) {
       this.socket.off('user_typing'); // Remove existing listeners
-      this.socket.on('user_typing', callback);
+      this.socket.on('user_typing', (data) => {
+        console.log('[SocketManager] Received user_typing event:', data);
+        callback(data);
+      });
       this.eventListeners.set('user_typing', callback);
     }
   }
@@ -250,6 +284,7 @@ class SocketManager {
 
   emitTyping(chatId, isTyping) {
     if (this.socket && this.isConnected) {
+      console.log('[SocketManager] Emitting', isTyping ? 'typing_start' : 'typing_stop', 'for chat', chatId);
       this.socket.emit(isTyping ? 'typing_start' : 'typing_stop', { chatId });
     } else {
       console.log('Cannot emit typing: socket not connected');
@@ -260,16 +295,98 @@ class SocketManager {
   joinUserRoom(userId) {
     if (this.socket && this.isConnected && userId) {
       this.socket.emit('join_user_room', userId);
-      console.log(`Joined user room: user_${userId}`);
+      console.log(`[SocketManager] Joined user room: user_${userId}`);
+      
+      // Verify room join was successful
+      setTimeout(() => {
+        if (this.socket && this.isConnected) {
+          console.log(`[SocketManager] Verifying user room join for: user_${userId}`);
+          this.socket.emit('join_user_room', userId);
+        }
+      }, 1000);
+    } else {
+      console.log(`[SocketManager] Cannot join user room: socket=${!!this.socket}, connected=${this.isConnected}, userId=${userId}`);
     }
   }
 
-  // Method to check connection status
+  // Method to set userId
+  setUserId(userId) {
+    this.userId = userId;
+    console.log('[SocketManager] UserId set to:', userId);
+    // If already connected, join the user room
+    if (this.socket && this.isConnected && userId) {
+      this.joinUserRoom(userId);
+    }
+  }
+
+  onIncomingCall(callback) {
+    if (this.socket) {
+      this.socket.off('incoming_call');
+      this.socket.on('incoming_call', callback);
+      this.eventListeners.set('incoming_call', callback);
+    }
+  }
+
+  onCallResponse(callback) {
+    if (this.socket) {
+      this.socket.off('call_response');
+      this.socket.on('call_response', callback);
+      this.eventListeners.set('call_response', callback);
+    }
+  }
+
+  onConnectionAccepted(callback) {
+    if (this.socket) {
+      console.log('[SocketManager] Setting up connection_accepted listener');
+      this.socket.off('connection_accepted');
+      this.socket.on('connection_accepted', (data) => {
+        console.log('[SocketManager] Received connection_accepted event:', data);
+        callback(data);
+      });
+      this.eventListeners.set('connection_accepted', callback);
+    } else {
+      console.warn('[SocketManager] Cannot set up connection_accepted listener - socket not connected');
+    }
+  }
+
+  emitCallUser(data) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('call_user', data);
+    }
+  }
+
+  emitCallResponse(data) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('call_response', data);
+    }
+  }
+
+  emitCallTypeSwitch(data) {
+    if (this.socket && this.isConnected) {
+      console.log('[SocketManager] Emitting call_type_switch:', data);
+      this.socket.emit('call_type_switch', data);
+    }
+  }
+
+  onCallTypeSwitched(callback) {
+    if (this.socket) {
+      this.socket.off('call_type_switched');
+      this.socket.on('call_type_switched', (data) => {
+        console.log('[SocketManager] Received call_type_switched event:', data);
+        callback(data);
+      });
+      this.eventListeners.set('call_type_switched', callback);
+    }
+  }
+
+  // Get connection status with more details
   getConnectionStatus() {
     return {
       isConnected: this.isConnected,
       isConnecting: this.isConnecting,
-      reconnectAttempts: this.reconnectAttempts,
+      socketId: this.socket?.id,
+      userId: this.userId,
+      hasSocket: !!this.socket
     };
   }
 

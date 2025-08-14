@@ -19,6 +19,7 @@ const AuthStack = () => {
         // Add this to eliminate all transition animations
         animationTypeForReplace: 'none',
         gestureEnabled: false,
+        cardStyle: { backgroundColor: '#121212' }, // Ensure all screens have dark background
         cardStyleInterpolator: () => ({
           cardStyle: { opacity: 1 },
         }),

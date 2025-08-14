@@ -68,7 +68,12 @@ const RelationshipGoals = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.doneButton, { opacity: selectedGoal === null ? 0.5 : 1 }]}
         disabled={selectedGoal === null}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => {
+          if (selectedGoal !== null) {
+            const selected = goals.find(g => g.id === selectedGoal);
+            navigation.navigate('EditProfile', { goal: selected ? selected.label : '' });
+          }
+        }}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>

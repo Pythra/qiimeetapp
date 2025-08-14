@@ -14,6 +14,17 @@ const careerOptions = [
 
 const Career = ({ navigation }) => {
   const [selected, setSelected] = useState(null);
+  // If coming from EditProfile with a pre-selected value, set it
+  React.useEffect(() => {
+    if (navigation && navigation.getState) {
+      const routes = navigation.getState().routes;
+      const editProfileRoute = routes && routes.find(r => r.name === 'EditProfile');
+      if (editProfileRoute && editProfileRoute.params && editProfileRoute.params.career) {
+        const idx = careerOptions.findIndex(opt => opt === editProfileRoute.params.career);
+        if (idx !== -1) setSelected(idx);
+      }
+    }
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -38,7 +49,11 @@ const Career = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.doneButton, { backgroundColor: selected === null ? '#292929' : '#ec066a' }]}
         disabled={selected === null}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => {
+          if (selected !== null) {
+            navigation.navigate('EditProfile', { career: careerOptions[selected] });
+          }
+        }}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>

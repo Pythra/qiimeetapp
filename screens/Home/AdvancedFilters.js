@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
+import Colors from '../../constants/Colors';
 import Slider from '@react-native-community/slider';
 
-const AdvancedFilters = ({ navigation }) => {
-  const [showOthers, setShowOthers] = useState(false);
-  const [heightValue, setHeightValue] = useState(150); // Starting height in cm
+const AdvancedFilters = ({ navigation, route }) => {
+  // Get filter values from BasicFilters if passed
+  const initialFilters = route?.params?.filters || {};
+  
+  const [showOthers, setShowOthers] = useState(initialFilters.showOthers || false);
+  const [heightValue, setHeightValue] = useState(initialFilters.heightValue || 150);
+  const [matchSimilarInterests, setMatchSimilarInterests] = useState(initialFilters.matchSimilarInterests || false);
 
   return (
     <View style={styles.container}>
@@ -40,12 +46,14 @@ const AdvancedFilters = ({ navigation }) => {
           />
           <View style={styles.switchRow}>
             <Text style={styles.switchText}>Show me other people if I run out</Text>
-            <Switch
-              value={showOthers}
-              onValueChange={setShowOthers}
-              trackColor={{ false: '#333', true: '#ec066a' }}
-              thumbColor="#fff"
-            />
+            <TouchableOpacity onPress={() => setShowOthers(!showOthers)} activeOpacity={0.7}>
+              <MaterialCommunityIcons
+                name={showOthers ? 'toggle-switch' : 'toggle-switch-off-outline'}
+                size={30}
+                color={showOthers ? Colors.primaryDark : '#888'}
+                style={{ marginRight: 2 }}
+              />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -59,10 +67,14 @@ const AdvancedFilters = ({ navigation }) => {
 
         <View style={styles.switchRow}>
           <Text style={styles.switchText}>Match with similar interests?</Text>
-          <Switch
-            trackColor={{ false: '#333', true: '#ec066a' }}
-            thumbColor="#fff"
-          />
+          <TouchableOpacity onPress={() => setMatchSimilarInterests(!matchSimilarInterests)} activeOpacity={0.7}>
+            <MaterialCommunityIcons
+              name={matchSimilarInterests ? 'toggle-switch' : 'toggle-switch-off-outline'}
+              size={30}
+              color={matchSimilarInterests ? Colors.primaryDark : '#888'}
+              style={{ marginRight: 2 }}
+            />
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity 

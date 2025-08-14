@@ -21,4 +21,4 @@ frontend/Qiimeet/node_modules/
 .gitignore
 
 # Ignore Python files if not needed
-**/*.py 
+**/*.py it se

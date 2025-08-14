@@ -1,9 +1,12 @@
-import React from 'react';
-import { View, Text, StyleSheet, Dimensions, ScrollView, Image, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Dimensions, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { API_BASE_URL } from '../../env';
 import wavyCheck from '../../assets/wavycheck.png';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -13,6 +16,65 @@ const getResponsiveSpacing = (phoneSpacing, tabletSpacing = phoneSpacing) => isT
 
 const ProfileVerificationScreen = ({ onClose }) => {
 const navigation = useNavigation();
+const [isLoading, setIsLoading] = useState(false);
+
+// Clear verification data for rejected users
+const clearVerificationData = async () => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      Alert.alert('Error', 'No authentication token found');
+      return false;
+    }
+
+    const response = await axios.post(
+      `${API_BASE_URL}/auth/clear-verification`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return response.data.success;
+  } catch (error) {
+    console.error('Error clearing verification data:', error);
+    return false;
+  }
+};
+
+// Handle start verification
+const handleStartVerification = async () => {
+  setIsLoading(true);
+  
+  try {
+    // Check if user has rejected verification status and clear data
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      const userResponse = await axios.get(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (userResponse.data.success && userResponse.data.user.verificationStatus === 'rejected') {
+        const cleared = await clearVerificationData();
+        if (!cleared) {
+          Alert.alert('Error', 'Failed to clear previous verification data');
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+    
+    navigation.navigate('VerificationProcess');
+  } catch (error) {
+    console.error('Error starting verification:', error);
+    Alert.alert('Error', 'Failed to start verification process');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const VerificationIcon = () => (
     <View style={styles.iconContainer}>
@@ -64,11 +126,14 @@ const navigation = useNavigation();
       </ScrollView>
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={styles.button}
+          style={[styles.button, isLoading && styles.buttonDisabled]}
           activeOpacity={0.8}
-          onPress={() => navigation.navigate('VerificationProcess')}
+          onPress={handleStartVerification}
+          disabled={isLoading}
         >
-          <Text style={styles.buttonText}>Start Verification</Text>
+          <Text style={styles.buttonText}>
+            {isLoading ? 'Preparing...' : 'Start Verification'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -180,6 +245,10 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
     letterSpacing: 0,
     lineHeight: 32,
+  },
+  buttonDisabled: {
+    backgroundColor: '#666',
+    opacity: 0.6,
   },
 });
 

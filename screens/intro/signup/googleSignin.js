@@ -44,7 +44,7 @@ const cognitoConfig = {
   usePKCE: true,
 };
 
-export const loginWithGoogle = async (navigation) => {
+export const loginWithGoogle = async (navigation, loginFunction) => {
   try {
     const redirectUri = AuthSession.makeRedirectUri({
       useProxy: true,
@@ -66,10 +66,20 @@ export const loginWithGoogle = async (navigation) => {
     if (result.type === 'success' && result.params.code) {
       const tokenResponse = await exchangeCodeForTokens(result.params.code, verifier);
       if (tokenResponse.access_token) {
-        await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
-        await AsyncStorage.setItem('idToken', tokenResponse.id_token);
-        await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
-        navigation.navigate('Welcome');
+        // Use the AuthContext login function if provided
+        if (loginFunction) {
+          // For now, we'll just store the tokens and navigate
+          // The actual user data will be fetched by AuthContext on app load
+          await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
+          await AsyncStorage.setItem('idToken', tokenResponse.id_token);
+          await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
+          navigation.navigate('MainTabs');
+        } else {
+          await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
+          await AsyncStorage.setItem('idToken', tokenResponse.id_token);
+          await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
+          navigation.navigate('Welcome');
+        }
       }
     } else {
       Alert.alert('Login Failed', 'Google authentication was cancelled or failed');

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
@@ -11,6 +11,9 @@ import whiteConnIcon from '../../assets/whiteconnicon.png';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { useAuth } from '../../components/AuthContext';
 
 const { width } = Dimensions.get('window');
 
@@ -32,82 +35,60 @@ const carouselData = [
   },
 ];
 
-const connectionOptions = [
-  {
-    title: 'Single Connection',
-    price: '₦5,000',
-    originalPrice: '₦6,500',
-    description: 'Connect with one person',
-  },
-  {
-    title: 'Two Connections',
-    price: '₦8,500',
-    originalPrice: '₦10,000',
-    description: 'Connect with two people',
-  },
-  {
-    title: 'Three Connections',
-    price: '₦10,000',
-    originalPrice: '₦12,000',
-    description: 'Connect with three people',
-  },
-];
+
 
 const PayForConnectionScreen = ({ navigation }) => {
+  const { user: currentUser, updateUser, refreshUser, balance: userBalance } = useAuth();
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState(0);
-  const [userBalance, setUserBalance] = useState(0);
-  const [allowedConnections, setAllowedConnections] = useState(0);
-  const [usedConnections, setUsedConnections] = useState(0);
-  const [remainingConnections, setRemainingConnections] = useState(0);
-  const [availableConnectionsLeftToBuy, setAvailableConnectionsLeftToBuy] = useState(3);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [insufficientBalanceModalVisible, setInsufficientBalanceModalVisible] = useState(false);
+  const [connectionOptions, setConnectionOptions] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [requiredAmount, setRequiredAmount] = useState(0);
 
-  // Fetch user balance, allowedConnections, and remainingConnections on mount
-  React.useEffect(() => {
-    const fetchBalanceAndConnections = async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) return;
-        const response = await axios.get(`${API_BASE_URL}/transaction/balance/current`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (response.data.success) {
-          setUserBalance(response.data.balance);
-        }
-        // Fetch allowedConnections and remainingConnections from user profile endpoint
-        const userRes = await axios.get(`${API_BASE_URL}/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        setAllowedConnections(userRes.data.allowedConnections || 0);
-        setUsedConnections(userRes.data.usedConnections || 0);
-        setRemainingConnections(userRes.data.remainingConnections || 0);
-        setAvailableConnectionsLeftToBuy(userRes.data.availableConnectionsLeftToBuy ?? 3);
-      } catch (error) {
-        setUserBalance(0);
-        setAllowedConnections(0);
-        setUsedConnections(0);
-        setRemainingConnections(0);
-        setAvailableConnectionsLeftToBuy(3);
-      } finally {
-        setLoading(false);
-      }
+  // Memoize user data calculations to avoid recalculating on every render
+  const userData = useMemo(() => {
+    const allowedConnections = currentUser?.allowedConnections || 0;
+    const usedConnections = currentUser?.usedConnections || 0;
+    const remainingConnections = currentUser?.remainingConnections || 0;
+    const availableConnectionsLeftToBuy = Math.max(0, 3 - allowedConnections);
+    
+    return {
+      allowedConnections,
+      usedConnections,
+      remainingConnections,
+      availableConnectionsLeftToBuy
     };
-    fetchBalanceAndConnections();
-  }, []);
+  }, [currentUser?.allowedConnections, currentUser?.usedConnections, currentUser?.remainingConnections, currentUser?.availableConnectionsLeftToBuy]);
 
-  // Log allowedConnections whenever it changes
-  React.useEffect(() => {
-    console.log('Allowed Connections (for CircularProgress):', allowedConnections);
-  }, [allowedConnections]);
+  // Only refresh user data if it's stale (older than 30 seconds)
+  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  
+  useFocusEffect(
+    useCallback(() => {
+      const now = Date.now();
+      const shouldRefresh = !currentUser || (now - lastRefreshTime > 30000); // 30 seconds
+      
+      if (shouldRefresh) {
+        setLastRefreshTime(now);
+        refreshUser();
+      }
+    }, [currentUser, lastRefreshTime, refreshUser])
+  );
+
+  // Fetch connection options when component mounts
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Component focused, fetching connection options...');
+      fetchConnectionOptions();
+    }, [])
+  );
+
+  // Debug: Log current connection options state
+  useEffect(() => {
+    console.log('Current connection options:', connectionOptions);
+  }, [connectionOptions]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -119,7 +100,7 @@ const PayForConnectionScreen = ({ navigation }) => {
       </View>
       <View style={styles.headerRight}>
         <Text style={styles.connectsText}>Connects</Text>
-        <CircularProgress step={usedConnections} total={allowedConnections} />
+        <CircularProgress step={userData.usedConnections} total={userData.allowedConnections} />
       </View>
     </View>
   );
@@ -138,8 +119,82 @@ const PayForConnectionScreen = ({ navigation }) => {
     </View>
   );
 
-  const maxConnections = 3;
-  // Use remainingConnections directly from state
+  // Fetch connection options from API
+  const fetchConnectionOptions = async () => {
+    try {
+      setLoadingOptions(true);
+      console.log('Fetching connection options from:', `${API_BASE_URL}/transaction/connection-fees`);
+      const response = await axios.get(`${API_BASE_URL}/transaction/connection-fees`);
+      console.log('API Response:', response.data);
+      
+      if (response.data.success) {
+        // Format the data to match the expected structure
+        const formattedOptions = response.data.fees.map(fee => ({
+          title: fee.title,
+          price: `₦${fee.price.toLocaleString()}`,
+          originalPrice: `₦${fee.originalPrice.toLocaleString()}`,
+          description: fee.description,
+          connections: fee.connections || 1
+        }));
+        console.log('Formatted options:', formattedOptions);
+        setConnectionOptions(formattedOptions);
+      } else {
+        console.error('Failed to fetch connection options:', response.data);
+        // Fallback to hardcoded options if API fails
+        setConnectionOptions([
+          {
+            title: 'Single Connection',
+            price: '₦5,000',
+            originalPrice: '₦6,500',
+            description: 'Connect with one person',
+            connections: 1
+          },
+          {
+            title: 'Two Connections',
+            price: '₦8,500',
+            originalPrice: '₦10,000',
+            description: 'Connect with two people',
+            connections: 2
+          },
+          {
+            title: 'Three Connections',
+            price: '₦10,000',
+            originalPrice: '₦12,000',
+            description: 'Connect with three people',
+            connections: 3
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error('Error fetching connection options:', error);
+      // Fallback to hardcoded options if API fails
+      setConnectionOptions([
+        {
+          title: 'Single Connection',
+          price: '₦5,000',
+          originalPrice: '₦6,500',
+          description: 'Connect with one person',
+          connections: 1
+        },
+        {
+          title: 'Two Connections',
+          price: '₦8,500',
+          originalPrice: '₦10,000',
+          description: 'Connect with two people',
+          connections: 2
+        },
+        {
+          title: 'Three Connections',
+          price: '₦10,000',
+          originalPrice: '₦12,000',
+          description: 'Connect with three people',
+          connections: 3
+        },
+      ]);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
 
   const handleOptionPress = (index) => {
     setSelectedOption(index);
@@ -148,25 +203,22 @@ const PayForConnectionScreen = ({ navigation }) => {
   const handleContinue = async () => {
     const selectedPlan = connectionOptions[selectedOption];
     const price = parseInt(selectedPlan.price.replace(/[^\d]/g, ''), 10);
-    let connectionsToAdd = 1;
-    if (selectedPlan.title === 'Two Connections') connectionsToAdd = 2;
-    if (selectedPlan.title === 'Three Connections') connectionsToAdd = 3;
-    // Only allow up to availableConnectionsLeftToBuy
-    if (connectionsToAdd > availableConnectionsLeftToBuy) {
-      alert(`You can only purchase up to ${availableConnectionsLeftToBuy} more connection(s).`);
-      return;
-    }
+    const connectionsToAdd = selectedPlan.connections || 1;
+    
     if (userBalance < price) {
       setRequiredAmount(price);
       setInsufficientBalanceModalVisible(true);
       return;
     }
+    
+    setLoading(true);
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         alert('No authentication token found');
         return;
       }
+      
       // Call backend to deduct balance and create transaction
       const response = await axios.post(
         `${API_BASE_URL}/transaction/deduct`,
@@ -178,11 +230,19 @@ const PayForConnectionScreen = ({ navigation }) => {
           }
         }
       );
+      
       if (response.data.success) {
-        setUserBalance(response.data.balance);
-        setAllowedConnections(response.data.allowedConnections);
-        setRemainingConnections(response.data.remainingConnections);
-        setAvailableConnectionsLeftToBuy(response.data.availableConnectionsLeftToBuy);
+        // Update AuthContext with the updated user data
+        const updatedUserData = {
+          ...currentUser,
+          balance: response.data.balance,
+          allowedConnections: response.data.allowedConnections,
+          remainingConnections: response.data.remainingConnections,
+          availableConnectionsLeftToBuy: Math.max(0, 3 - response.data.allowedConnections)
+        };
+        updateUser(updatedUserData);
+        
+        // Navigate immediately without additional API calls
         navigation.navigate('PremiumScreen', {
           amountPaid: price,
           fromConnection: true,
@@ -190,12 +250,15 @@ const PayForConnectionScreen = ({ navigation }) => {
         });
       }
     } catch (error) {
-      // Silently handle errors since deductions work correctly
+      console.error('Transaction error:', error);
+      // Navigate even if there's an error (deductions work correctly)
       navigation.navigate('PremiumScreen', {
         amountPaid: price,
         fromConnection: true,
         planTitle: selectedPlan.title,
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -204,55 +267,85 @@ const PayForConnectionScreen = ({ navigation }) => {
     navigation.navigate('FundWallet');
   };
 
-  const renderConnectionOptions = () => (
-    <View style={styles.optionsWrapper}>
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.optionsContainer}
-        style={styles.optionsScrollView}
-      >
-        {connectionOptions.map((option, idx) => {
-          let connectionsForOption = 1;
-          if (option.title === 'Two Connections') connectionsForOption = 2;
-          if (option.title === 'Three Connections') connectionsForOption = 3;
-          // Disable if buying this option would make allowedConnections exceed 3 or availableConnectionsLeftToBuy is less than needed
-          const disabled = (connectionsForOption > availableConnectionsLeftToBuy) || (allowedConnections + connectionsForOption > 3);
-          return (
-            <TouchableOpacity 
-              key={idx}
-              style={[
-                styles.optionButton,
-                selectedOption === idx ? styles.optionButtonActive : styles.optionButtonInactive,
-                disabled && { opacity: 0.4 }
-              ]}
-              onPress={() => !disabled && handleOptionPress(idx)}
-              activeOpacity={disabled ? 1 : 0.7}
-              disabled={disabled}
-            >
-              <Text style={styles.optionTitle}>{option.title}</Text>
-              <Text style={styles.optionPrice}>{option.price}</Text>
-              <Text style={styles.originalPrice}>{option.originalPrice}</Text>
-              <Text style={styles.optionDescription}>{option.description}</Text>
-              {disabled && (
-                <Text style={{ color: '#ec066a', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
-                  Not available (max {availableConnectionsLeftToBuy} left to buy)
-                </Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-      {availableConnectionsLeftToBuy === 0 && (
-        <Text style={{ color: '#ec066a', fontSize: 14, textAlign: 'center', marginTop: 12 }}>
-          You have reached the maximum number of connections you can buy.
-        </Text>
-      )}
-    </View>
-  );
+  const renderConnectionOptions = () => {
+    if (loadingOptions) {
+      return (
+        <View style={styles.optionsWrapper}>
+          <View style={styles.optionsContainer}>
+            <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
+              Loading connection options...
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (!connectionOptions || connectionOptions.length === 0) {
+      return (
+        <View style={styles.optionsWrapper}>
+          <View style={styles.optionsContainer}>
+            <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
+              No connection options available
+            </Text>
+            <Text style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: 14, textAlign: 'center', marginTop: 8 }}>
+              Please check with admin or try again later
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.optionsWrapper}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.optionsContainer}
+          style={styles.optionsScrollView}
+        >
+          {connectionOptions.map((option, idx) => {
+            // Calculate if this option should be disabled
+            const connectionsToAdd = option.connections || 1;
+            const maxAllowed = 3;
+            const wouldExceedLimit = (userData.allowedConnections + connectionsToAdd) > maxAllowed;
+            const isDisabled = wouldExceedLimit;
+            
+            return (
+              <TouchableOpacity 
+                key={idx}
+                style={[
+                  styles.optionButton,
+                  selectedOption === idx ? styles.optionButtonActive : styles.optionButtonInactive,
+                  isDisabled && { opacity: 0.4 }
+                ]}
+                onPress={() => !isDisabled && handleOptionPress(idx)}
+                activeOpacity={isDisabled ? 1 : 0.7}
+                disabled={isDisabled}
+              >
+                <Text style={styles.optionTitle}>{option.title}</Text>
+                <Text style={styles.optionPrice}>{option.price}</Text>
+                <Text style={styles.originalPrice}>{option.originalPrice}</Text>
+                <Text style={styles.optionDescription}>{option.description}</Text>
+                {isDisabled && (
+                  <Text style={{ color: '#ec066a', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                    Would exceed limit
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        {userData.allowedConnections >= 3 && (
+          <Text style={{ color: '#ec066a', fontSize: 14, textAlign: 'center', marginTop: 12 }}>
+            You have reached the maximum number of connections you can buy.
+          </Text>
+        )}
+      </View>
+    );
+  };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {renderHeader()}
       
       {/* Carousel for top slide */}
@@ -262,8 +355,7 @@ const PayForConnectionScreen = ({ navigation }) => {
           width={width}
           height={260}
           data={carouselData}
-          autoPlay={true}
-          autoplayInterval={3500}
+          autoPlay={false} // Disabled auto-play for better performance
           scrollAnimationDuration={800}
           onProgressChange={(_, absoluteProgress) => {
             setCarouselIndex(Math.round(absoluteProgress));
@@ -291,9 +383,11 @@ const PayForConnectionScreen = ({ navigation }) => {
         <TouchableOpacity 
           style={styles.continueButton}
           onPress={handleContinue}
-          disabled={loading || availableConnectionsLeftToBuy === 0}
+          disabled={loading}
         >
-          <Text style={styles.continueButtonText}>Continue</Text>
+          <Text style={styles.continueButtonText}>
+            {loading ? 'Processing...' : 'Continue'}
+          </Text>
         </TouchableOpacity>
       </View>
       
@@ -304,15 +398,14 @@ const PayForConnectionScreen = ({ navigation }) => {
         currentBalance={userBalance}
         requiredAmount={requiredAmount}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: 8,
+    backgroundColor: '#121212', 
   },
   header: {
     flexDirection: 'row',
@@ -478,8 +571,8 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     backgroundColor: '#ec066a',
-    marginHorizontal: 24,
-    marginBottom: 56,
+    marginHorizontal: 24, 
+    marginBottom:24,
     paddingVertical: 16,
     borderRadius: 90,
     alignItems: 'center',

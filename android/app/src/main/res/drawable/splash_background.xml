@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Background gradient -->
+  <item>
+    <shape android:shape="rectangle">
+      <gradient
+        android:startColor="#EC076C"
+        android:endColor="#F70546"
+        android:angle="90" />
+    </shape>
+  </item>
+  
+  <!-- Logo centered with fixed dp width and preserved aspect ratio -->
+  <item
+    android:width="@dimen/splash_logo_width"
+    android:gravity="center">
+    <bitmap
+      android:src="@drawable/splashscreen_image"
+      android:gravity="center" />
+  </item>
+</layer-list>

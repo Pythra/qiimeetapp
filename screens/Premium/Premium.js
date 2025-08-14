@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Dimensions, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
+import { useAuth } from '../../components/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
 import PaymentSuccessModal from './components/PaymentSuccessModal';
+import ConnectionLimitModal from '../Likes/ConnectionLimitModal';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -18,9 +20,10 @@ const getResponsiveFontSize = (phoneSize, tabletSize) => isTablet ? tabletSize :
 const getResponsiveSpacing = (phoneSpacing, tabletSpacing) => isTablet ? tabletSpacing : phoneSpacing;
 
 const PremiumScreen = ({ navigation, route }) => {
-  const [isVerificationPending, setIsVerificationPending] = useState(false);
-  const [balance, setBalance] = useState(0);
+  const { balance, refreshBalance, updateBalance, user: currentUser, refreshUser } = useAuth();
+  const [verificationStatus, setVerificationStatus] = useState('false');
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false);
+  const [limitModalVisible, setLimitModalVisible] = useState(false);
   const [paymentSuccessData, setPaymentSuccessData] = useState({
     title: '',
     subtitle: '',
@@ -30,6 +33,101 @@ const PremiumScreen = ({ navigation, route }) => {
   // Format balance with commas
   const formatBalance = (amount) => {
     return amount.toLocaleString();
+  };
+
+  // Fetch user's verification status
+  const fetchVerificationStatus = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        // Fallback to currentUser from AuthContext if no token
+        if (currentUser && currentUser.verificationStatus) {
+          setVerificationStatus(currentUser.verificationStatus);
+        }
+        return;
+      }
+
+      const response = await axios.get(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        }
+      });
+
+      if (response.data.success && response.data.user) {
+        const newStatus = response.data.user.verificationStatus || 'false';
+        console.log('Fetched verification status:', newStatus);
+        setVerificationStatus(newStatus);
+      }
+    } catch (error) {
+      console.error('Error fetching verification status:', error);
+      // Fallback to currentUser from AuthContext on error
+      if (currentUser && currentUser.verificationStatus) {
+        setVerificationStatus(currentUser.verificationStatus);
+      }
+    }
+  };
+
+  // Get verification status display
+  const getVerificationStatusDisplay = () => {
+    switch (verificationStatus) {
+      case 'pending':
+        return {
+          text: 'Pending',
+          style: styles.pendingStatus,
+          textStyle: styles.pendingText,
+          canNavigate: false
+        };
+      case 'verified':
+        return {
+          text: 'Verified',
+          style: styles.verifiedStatus,
+          textStyle: styles.verifiedText,
+          canNavigate: false
+        };
+      case 'true':
+        return {
+          text: null,
+          style: null,
+          textStyle: null,
+          canNavigate: true
+        };
+      case 'rejected':
+        return {
+          text: 'Rejected',
+          style: styles.rejectedStatus,
+          textStyle: styles.rejectedText,
+          canNavigate: true
+        };
+      default:
+        return {
+          text: null,
+          style: null,
+          textStyle: null,
+          canNavigate: true
+        };
+    }
+  };
+
+  // Handle verification card press
+  const handleVerificationPress = () => {
+    const { canNavigate } = getVerificationStatusDisplay();
+    
+    // If verification is pending, show VerificationInProgress screen
+    if (verificationStatus === 'pending') {
+      navigation.navigate('VerificationInProgress');
+      return;
+    }
+    
+    // If verification is verified, allow access to view/update verification
+    if (verificationStatus === 'verified' || verificationStatus === 'true') {
+      navigation.navigate('ProfileVerification');
+      return;
+    }
+    
+    // For all other statuses (rejected, default), go to verification flow
+    if (canNavigate) {
+      navigation.navigate('ProfileVerification');
+    }
   };
 
   // Show payment success modal
@@ -43,28 +141,33 @@ const PremiumScreen = ({ navigation, route }) => {
     setShowPaymentSuccessModal(false);
   };
 
-  // Fetch user balance from backend
-  const fetchUserBalance = async () => {
+  // Check if user has existing connections or requests
+  const hasExistingConnectionOrRequest = () => {
+    if (!currentUser) return false;
+    const hasActiveConnection = currentUser.connections && currentUser.connections.length > 0;
+    const hasPendingRequest = currentUser.requests && currentUser.requests.length > 0;
+    return hasActiveConnection || hasPendingRequest;
+  };
+
+  // Handle Pay for Connection navigation
+  const handlePayForConnection = () => {
+    // Check if user already has a connection or pending request
+    if (hasExistingConnectionOrRequest()) {
+      setLimitModalVisible(true);
+      return;
+    }
+    
+    // If no existing connections/requests, allow navigation
+    navigation.navigate('PayForConnection');
+  };
+
+  const handleUpgradeConnections = () => {
+    setLimitModalVisible(false);
     try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        Alert.alert('Error', 'No authentication token found');
-        return;
-      }
-
-      const response = await axios.get(`${API_BASE_URL}/transaction/balance/current`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data.success) {
-        setBalance(response.data.balance);
-      }
+      navigation.navigate('PayForConnection');
     } catch (error) {
-      console.error('Error fetching balance:', error);
-      // Don't show alert for balance fetch errors, just keep current balance
+      console.error('Navigation error:', error);
+      navigation.navigate('Premium');
     }
   };
 
@@ -107,7 +210,7 @@ const PremiumScreen = ({ navigation, route }) => {
       if (response.data.success) {
         console.log('Transaction created successfully:', response.data.transaction);
         // Refresh balance after successful transaction
-        await fetchUserBalance();
+        await refreshBalance();
       } else {
         Alert.alert('Transaction Error', 'Transaction was not created successfully.');
         console.error('Transaction not successful:', response.data);
@@ -127,8 +230,27 @@ const PremiumScreen = ({ navigation, route }) => {
   };
 
   useEffect(() => {
+    // Fetch verification status on component mount
+    fetchVerificationStatus();
+    
+    // Handle verification submission - refresh user data and status
     if (route.params?.verificationSubmitted) {
-      setIsVerificationPending(true);
+      console.log('Verification was submitted, refreshing user data...');
+      // Fetch fresh verification status
+      fetchVerificationStatus();
+      // Also refresh user data in AuthContext to get updated verification status
+      if (refreshUser) {
+        refreshUser();
+      }
+      setTimeout(() => {
+        // Small delay to ensure backend has processed the verification
+        fetchVerificationStatus();
+        if (refreshUser) {
+          refreshUser();
+        }
+      }, 1000);
+      // Clear the parameter
+      navigation.setParams({ verificationSubmitted: undefined });
     }
     
     // Handle payment success and update balance
@@ -139,8 +261,8 @@ const PremiumScreen = ({ navigation, route }) => {
       // Create transaction record
       createTransaction(amountAdded, reference);
       
-      // Update local balance immediately for better UX
-      setBalance(prevBalance => prevBalance + amountAdded);
+      // Update AuthContext balance immediately for better UX
+      updateBalance(balance + amountAdded);
       
       // Show success message
       setTimeout(() => {
@@ -159,8 +281,8 @@ const PremiumScreen = ({ navigation, route }) => {
       const amountPaid = route.params.amountPaid;
       const planTitle = route.params.planTitle;
 
-      // Deduct from local balance immediately
-      setBalance(prevBalance => prevBalance - amountPaid);
+      // Deduct from AuthContext balance immediately
+      updateBalance(Math.max(0, balance - amountPaid));
 
       // Optionally, create a transaction record for the deduction
       createTransaction(-amountPaid, `Connection payment: ${planTitle}`);
@@ -182,8 +304,8 @@ const PremiumScreen = ({ navigation, route }) => {
       const amountPaid = route.params.amountPaid;
       const planTitle = route.params.planTitle;
 
-      // Deduct from local balance immediately
-      setBalance(prevBalance => prevBalance - amountPaid);
+      // Deduct from AuthContext balance immediately
+      updateBalance(Math.max(0, balance - amountPaid));
 
       // Optionally, create a transaction record for the deduction
       createTransaction(-amountPaid, `Subscription payment: ${planTitle}`);
@@ -199,14 +321,23 @@ const PremiumScreen = ({ navigation, route }) => {
       // Clear the params to prevent double deduction
       navigation.setParams({ fromSubscription: undefined, amountPaid: undefined, planTitle: undefined });
     }
-  }, [route.params, navigation]);
+  }, [route.params, navigation, balance, updateBalance, refreshBalance]);
 
   useFocusEffect(
     React.useCallback(() => {
-      // Fetch balance when screen comes into focus
-      fetchUserBalance();
-    }, [])
+      // Refresh balance and verification status when screen comes into focus
+      refreshBalance();
+      fetchVerificationStatus();
+    }, [refreshBalance])
   );
+
+  // Also update verification status when currentUser changes
+  useEffect(() => {
+    if (currentUser && currentUser.verificationStatus) {
+      console.log('CurrentUser verification status changed:', currentUser.verificationStatus);
+      setVerificationStatus(currentUser.verificationStatus);
+    }
+  }, [currentUser?.verificationStatus]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -216,20 +347,25 @@ const PremiumScreen = ({ navigation, route }) => {
       > 
         <TouchableOpacity
           style={styles.verificationCard}
-          onPress={() => navigation.navigate('ProfileVerification')}
+          onPress={handleVerificationPress}
+          disabled={verificationStatus === 'verified' || verificationStatus === 'pending'}
         >
           <View style={styles.verificationContent}>
             <View style={styles.verificationHeader}>
               <Text style={styles.verificationText}>Verify Your Profile</Text>
-              {isVerificationPending && (
-                <View style={styles.pendingContainer}>
-                  <Text style={styles.pendingText}>Pending</Text>
+              {getVerificationStatusDisplay().text && (
+                <View style={getVerificationStatusDisplay().style}>
+                  <Text style={getVerificationStatusDisplay().textStyle}>
+                    {getVerificationStatusDisplay().text}
+                  </Text>
                 </View>
               )}
             </View>
             <View style={{marginTop: getResponsiveSpacing(4, 6)}}>
             <Text style={styles.verificationSubtext}>
-              Verify your profile to stay secure and connect with real matches
+              {verificationStatus === 'rejected' 
+                ? 'Your verification was rejected. Tap to try again with new documents.' 
+                : 'Verify your profile to stay secure and connect with real matches'}
             </Text>
             </View>
           </View>
@@ -263,7 +399,7 @@ const PremiumScreen = ({ navigation, route }) => {
         {/* Pay For Connection Section */}
         <TouchableOpacity 
           style={styles.verificationCard}
-          onPress={() => navigation.navigate('PayForConnection')}
+          onPress={handlePayForConnection}
         >
           <View style={styles.verificationContent}>
             <View style={styles.titleWithIcon}>
@@ -345,6 +481,15 @@ const PremiumScreen = ({ navigation, route }) => {
         subtitle={paymentSuccessData.subtitle}
         buttonText={paymentSuccessData.buttonText}
       />
+      
+      <ConnectionLimitModal 
+        visible={limitModalVisible}
+        onClose={() => setLimitModalVisible(false)}
+        onUpgrade={handleUpgradeConnections}
+        currentConnections={currentUser?.allowedConnections || 0}
+        maxConnections={currentUser?.allowedConnections || 0}
+        hasPendingRequest={hasExistingConnectionOrRequest()}
+      />
     </SafeAreaView>
   );
 };
@@ -365,9 +510,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e1e',
     borderRadius: getResponsiveSpacing(12, 16),
     padding: getResponsiveSpacing(16, 20),
+    marginTop: getResponsiveSpacing(20, 30),
     marginBottom: getResponsiveSpacing(15, 20),
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  verificationCardDisabled: {
+    opacity: 0.6,
+    backgroundColor: '#0a0a0a',
   },
   buttonText: {
     color: '#fff',
@@ -547,14 +697,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  pendingContainer: {
+  pendingStatus: {
     backgroundColor: 'rgba(242, 147, 57, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 48,
+  },
+  verifiedStatus: {
+    backgroundColor: 'rgba(110, 197, 49, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 48,
+  },
+  rejectedStatus: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 48,
   },
   pendingText: {
     color: '#f29339',
+    fontSize: 12,
+    fontFamily: FONTS.medium,
+  },
+  verifiedText: {
+    color: '#6ec531',
+    fontSize: 12,
+    fontFamily: FONTS.medium,
+  },
+  rejectedText: {
+    color: '#ef4444',
     fontSize: 12,
     fontFamily: FONTS.medium,
   },

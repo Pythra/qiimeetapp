@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FONTS } from '../../constants/font';
@@ -8,10 +8,11 @@ import ScreenWrapper from '../../components/ScreenWrapper';
 import { FontAwesome6 } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../../components/AuthContext';
 
 const MatchDetail = ({ navigation, route }) => {
   const userId = route.params?.userId;
+  const { token, initialized, getProfileImageSource, getImageSource } = useAuth();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,12 +24,13 @@ const MatchDetail = ({ navigation, route }) => {
       try {
         setLoading(true);
         setError(null);
-        const token = await AsyncStorage.getItem('token');
+        
         if (!token) {
           setError('No authentication token found');
           setLoading(false);
           return;
         }
+        
         const response = await axios.get(`${API_BASE_URL}/auth/user/${userId}`,
           {
             headers: {
@@ -44,31 +46,265 @@ const MatchDetail = ({ navigation, route }) => {
         setLoading(false);
       }
     };
-    if (userId) fetchUser();
-  }, [userId]);
+    
+    if (userId && initialized) fetchUser();
+  }, [userId, token, initialized]);
 
-  if (loading) {
-    return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>Loading...</Text></View>;
-  }
-  if (error || !user) {
-    return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>{error || 'User not found'}</Text></View>;
+    // Show skeleton loader while loading or if no user data
+  if (loading || !user) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.container}>
+          {/* Header - Keep interactive elements outside skeleton */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              paddingVertical: 8,
+              paddingHorizontal: 16,
+              borderRadius: 90,
+              backgroundColor: '#2A2A2A',
+              width: 100,
+              height: 40
+            }} />
+          </View>
+
+          <ScrollView>
+            {/* Goal Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 50, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: '#1E1E1E',
+                padding: 10,
+                borderRadius: 90,
+                alignSelf: 'flex-start',
+                width: 200,
+                height: 80
+              }}>
+                <View style={{ width: 16, height: 32, borderRadius: 8, backgroundColor: '#2A2A2A' }} />
+                <View style={{ width: 150, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+              </View>
+            </View>
+
+            {/* Bio Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 40, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{ width: '85%', height: 40, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+            </View>
+
+            {/* About Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 60, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}>
+                {[
+                  { width: 110, text: 'Want Kids' },
+                  { width: 85, text: 'Zodiac' },
+                  { width: 95, text: 'Education' },
+                  { width: 100, text: 'Personality' },
+                  { width: 75, text: 'Religion' },
+                  { width: 70, text: 'Height' },
+                  { width: 80, text: 'Career' }
+                ].map((item, index) => (
+                  <View key={index} style={{
+                    backgroundColor: '#1E1E1E',
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    borderRadius: 20,
+                    alignSelf: 'flex-start',
+                    width: item.width,
+                    height: 64
+                  }}>
+                    <View style={{ width: item.width - 24, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Lifestyle Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 80, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}>
+                {[
+                  { width: 120 },
+                  { width: 95 },
+                  { width: 110 }
+                ].map((item, index) => (
+                  <View key={index} style={{
+                    backgroundColor: '#1E1E1E',
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    borderRadius: 20,
+                    alignSelf: 'flex-start',
+                    width: item.width,
+                    height: 64
+                  }}>
+                    <View style={{ width: item.width - 24, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Photos Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 70, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                flexDirection: 'row',
+                gap: 10,
+              }}>
+                {[1, 2, 3].map((item) => (
+                  <View 
+                    key={item} 
+                    style={{
+                      width: 100,
+                      height: 200,
+                      borderRadius: 8,
+                      backgroundColor: '#1E1E1E'
+                    }} 
+                  />
+                ))}
+              </View>
+            </View>
+
+            {/* Interests Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 90, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}>
+                {[
+                  { width: 80 },
+                  { width: 100 },
+                  { width: 70 },
+                  { width: 110 },
+                  { width: 90 },
+                  { width: 85 }
+                ].map((item, index) => (
+                  <View key={index} style={{
+                    backgroundColor: '#1E1E1E',
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                    borderRadius: 20,
+                    alignSelf: 'flex-start',
+                    width: item.width,
+                    height: 64
+                  }}>
+                    <View style={{ width: item.width - 24, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Language Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 80, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                backgroundColor: '#1E1E1E',
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRadius: 20,
+                alignSelf: 'flex-start',
+                width: 80,
+                height: 64
+              }}>
+                <View style={{ width: 56, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+              </View>
+            </View>
+
+            {/* Location Section Skeleton */}
+            <View style={[styles.section, { paddingBottom: 20, paddingTop: 5 }]}>
+              <View style={{ width: 70, height: 38, borderRadius: 4, marginBottom: 10, backgroundColor: '#2A2A2A' }} />
+              <View style={{
+                backgroundColor: '#1E1E1E',
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRadius: 20,
+                alignSelf: 'flex-start',
+                width: 75,
+                height: 64
+              }}>
+                <View style={{ width: 51, height: 32, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+              </View>
+            </View>
+
+            {/* Bottom Actions Skeleton */}
+            <View style={{ padding: 20 }}>
+              {/* Block Button */}
+              <View style={{
+                padding: 15,
+                borderRadius: 8,
+                alignItems: 'center',
+                height: 100,
+                justifyContent: 'center'
+              }}>
+                <View style={{ width: 120, height: 38, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+              </View>
+              
+              {/* Report Button */}
+              <View style={{
+                padding: 15,
+                borderRadius: 8,
+                alignItems: 'center',
+                height: 100,
+                justifyContent: 'center'
+              }}>
+                <View style={{ width: 140, height: 38, borderRadius: 4, backgroundColor: '#2A2A2A' }} />
+              </View>
+              
+              {/* Action Buttons */}
+              <View style={{
+                flexDirection: 'row',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: 24,
+                marginTop: 20,
+              }}>
+                <View style={{
+                  width: 64,
+                  height: 128,
+                  borderRadius: 32,
+                  backgroundColor: '#1E1E1E'
+                }} />
+                <View style={{
+                  width: 64,
+                  height: 128,
+                  borderRadius: 32,
+                  backgroundColor: '#1E1E1E'
+                }} />
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </ScreenWrapper>
+    );
   }
 
-  // Add helper for image source
-  const getImageSource = (imagePath) => {
-    const cloudFrontUrl = 'https://dk665xezaubcy.cloudfront.net';
-    if (!imagePath) return require('../../assets/model.jpg');
-    if (imagePath.startsWith('http')) {
-      return { uri: imagePath, cache: 'force-cache' };
-    }
-    if (imagePath.startsWith('/uploads/')) {
-      return { uri: `${cloudFrontUrl}${imagePath}`, cache: 'force-cache' };
-    }
-    if (!imagePath.startsWith('/')) {
-      return { uri: `${cloudFrontUrl}/uploads/images/${imagePath}`, cache: 'force-cache' };
-    }
-    return require('../../assets/model.jpg');
-  };
+  // Show error state only if there's an actual error
+  if (error) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
+        <Text style={{ color: 'white' }}>{error}</Text>
+      </View>
+    );
+  }
+
+
 
   // Helper to calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -166,7 +402,7 @@ const MatchDetail = ({ navigation, route }) => {
                   <TouchableOpacity 
                     key={index}
                     onPress={() => navigation.navigate('PhotoGallery', {
-                      photos: user.profilePictures.map(getImageSource),
+                      photos: user.profilePictures.map(photo => getImageSource(photo)),
                       initialIndex: index
                     })}
                   >

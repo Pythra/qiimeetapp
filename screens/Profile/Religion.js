@@ -38,7 +38,11 @@ const Religion = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.doneButton, { backgroundColor: selected === null ? '#292929' : '#ec066a' }]}
         disabled={selected === null}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => {
+          if (selected !== null) {
+            navigation.navigate('EditProfile', { religon: religionOptions[selected] });
+          }
+        }}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>

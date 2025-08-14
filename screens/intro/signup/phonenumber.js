@@ -15,10 +15,24 @@ export function formatPhoneNumber(number) {
 
 export async function sendOTP(phoneNumber) {
   try {
-    const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+    const url = 'https://api.ng.termii.com/api/sms/otp/send';
+    const payload = {
+      api_key: 'TLaoOhDNJhrangBPuKfzEtMHjPFbVUOWXyozycKuuNbGcGinofhPGBGqggUXCa',
+      message_type: 'NUMERIC',
+      to: `234${phoneNumber}`,
+      from: 'N-Alert',
+      channel: 'dnd',
+      pin_attempts: 10,
+      pin_time_to_live: 5,
+      pin_length: 6,
+      pin_placeholder: '< 1234 >',
+      message_text: 'Your Qiimeet authentication pin is < 1234 >. It expires in 10 minutes',
+      pin_type: 'NUMERIC',
+    };
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify(payload),
     });
     const data = await response.json();
     return data;
@@ -32,6 +46,7 @@ export function usePhoneNumber(navigation) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [formattedNumber, setFormattedNumber] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handlePhoneChange = (text) => {
     setError('');
@@ -51,12 +66,43 @@ export function usePhoneNumber(navigation) {
 
   // Only register phone number and save token, no OTP/verification
   const handleNext = async () => {
-    if (phoneNumber.length === 10) {
-      // Skip OTP sending for testing
-      navigation.navigate('Auth', {
-        screen: 'VerificationCode',
-        params: { phoneNumber, pinId: 'dummy-pin-id' },
-      });
+    if (phoneNumber.length === 10 && !loading) {
+      setLoading(true);
+      try {
+        // Fetch all users from admin endpoint
+        const usersRes = await fetch(`${API_BASE_URL}/admin/users`);
+        const usersData = await usersRes.json();
+        if (usersData.success && Array.isArray(usersData.users)) {
+          const exists = usersData.users.some(
+            user => (user.phoneNumber || '').replace(/^0/, '') === phoneNumber
+          );
+          if (exists) {
+            Alert.alert('Error', 'Phone number already exists. Please use a different number.');
+            setLoading(false);
+            return;
+          }
+        }
+        // If not exists, send OTP
+        const otpResult = await sendOTP(phoneNumber);
+        if (otpResult.pinId) {
+          await AsyncStorage.setItem('pinId', otpResult.pinId);
+          
+          // Use the processed phone number from the backend response if available
+          const phoneNumberToUse = otpResult.phoneNumber || phoneNumber;
+          
+          navigation.navigate('Auth', {
+            screen: 'VerificationCode',
+            params: { phoneNumber: phoneNumberToUse, pinId: otpResult.pinId },
+          });
+        } else {
+          Alert.alert('Error', otpResult.message || 'Failed to send OTP');
+        }
+      } catch (err) {
+        console.log('OTP send error:', err);
+        Alert.alert('Error', 'Failed to send OTP');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -66,5 +112,6 @@ export function usePhoneNumber(navigation) {
     error,
     handlePhoneChange,
     handleNext,
+    loading, // When true, show a large ActivityIndicator instead of the button in the signup screen
   };
 }

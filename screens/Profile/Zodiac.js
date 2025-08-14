@@ -35,7 +35,11 @@ const Zodiac = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.doneButton, { backgroundColor: selected === null ? '#292929' : '#ec066a' }]}
         disabled={selected === null}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => {
+          if (selected !== null) {
+            navigation.navigate('EditProfile', { zodiac: zodiacSigns[selected] });
+          }
+        }}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>

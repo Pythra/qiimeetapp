@@ -56,7 +56,7 @@ const Lifestyle = ({ navigation }) => {
       </ScrollView>
       <TouchableOpacity
         style={styles.doneButton}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => navigation.navigate('EditProfile', { lifestyle: selectedChoices })}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>

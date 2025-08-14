@@ -47,7 +47,7 @@ const cognitoConfig = {
 // Log the redirect URI here for debugging
 console.log('Cognito redirect URI:', cognitoConfig.redirectUri);
 
-export const loginWithFacebook = async (navigation) => {
+export const loginWithFacebook = async (navigation, loginFunction) => {
   const redirectUri = cognitoConfig.redirectUri;
   console.log('Using redirect URI:', redirectUri);
 
@@ -75,11 +75,20 @@ export const loginWithFacebook = async (navigation) => {
     const tokenResponse = await exchangeCodeForTokens(result.params.code, verifier);
 
     if (tokenResponse.access_token) {
-      await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
-      await AsyncStorage.setItem('idToken', tokenResponse.id_token);
-      await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
-
-      navigation.navigate('Welcome');
+      // Use the AuthContext login function if provided
+      if (loginFunction) {
+        // For now, we'll just store the tokens and navigate
+        // The actual user data will be fetched by AuthContext on app load
+        await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
+        await AsyncStorage.setItem('idToken', tokenResponse.id_token);
+        await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
+        navigation.navigate('MainTabs');
+      } else {
+        await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
+        await AsyncStorage.setItem('idToken', tokenResponse.id_token);
+        await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
+        navigation.navigate('Welcome');
+      }
     }
   } else if (result.type === 'error') {
     // Show error from result if available

@@ -4,21 +4,24 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
 import { FontAwesome6 } from '@expo/vector-icons';
 
-const ConnectionLimitModal = ({ visible, onClose, onUpgrade, currentConnections, maxConnections, remainingConnections }) => {
+const ConnectionLimitModal = ({ visible, onClose, onUpgrade, currentConnections, maxConnections, remainingConnections, hasPendingRequest }) => {
   const getModalContent = () => {
+    if (currentConnections >= 1 || hasPendingRequest) {
+      return {
+        title: "Connection Limit Reached",
+        description: "You already have a pending request or active connection. Cancel the request or end the connection to connect with another user.",
+        showButton: false,
+        buttonText: "",
+        icon: "hand-paper"
+      };
+    }
     if (currentConnections === 0) {
       return {
         title: "No Connections Available",
         description: "You need to purchase connections to start connecting with people. Get started with our connection packages!",
+        showButton: true,
         buttonText: "Get Connections",
         icon: "lock"
-      };
-    } else {
-      return {
-        title: "Connection Limit Reached",
-        description: `You've used all ${currentConnections} of your available connections. Upgrade to get more connections and continue meeting new people!`,
-        buttonText: "Get More Connections",
-        icon: "upgrade"
       };
     }
   };
@@ -43,21 +46,16 @@ const ConnectionLimitModal = ({ visible, onClose, onUpgrade, currentConnections,
             </View>
             <Text style={styles.title}>{modalContent.title}</Text>
             <Text style={styles.description}>{modalContent.description}</Text>
-            
-            <View style={styles.connectionInfo}>
-              <Text style={styles.connectionText}>
-                Used: {currentConnections}/{maxConnections} connections
-              </Text>
-            </View>
-
-            <TouchableOpacity 
-              style={styles.upgradeButton}
-              onPress={onUpgrade}
-            >
-              <Text style={styles.upgradeButtonText}>
-                {modalContent.buttonText}
-              </Text>
-            </TouchableOpacity>
+            {modalContent.showButton && (
+              <TouchableOpacity 
+                style={styles.upgradeButton}
+                onPress={onUpgrade}
+              >
+                <Text style={styles.upgradeButtonText}>
+                  {modalContent.buttonText}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -144,8 +142,7 @@ const styles = StyleSheet.create({
   upgradeButtonText: {
     color: '#fff',
     fontSize: 24,
-    fontWeight: '600',
-    fontFamily: FONTS?.medium || 'System',
+    fontWeight: '700', 
   },
 });
 

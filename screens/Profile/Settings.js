@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import TopHeader from '../../components/TopHeader';
 import CustomButton from '../../constants/button';
 import { FONTS } from '../../constants/font';
@@ -7,6 +8,9 @@ import Colors from '../../constants/Colors';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import HollowButton from '../../constants/HollowButton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../../components/AuthContext';
+import SocketManager from '../../utils/socket';
+import { clearAllCachedData } from '../../utils/clearCache';
 
 const settingsOptions = [
   { label: 'Account' },
@@ -18,11 +22,14 @@ const settingsOptions = [
 
 const Settings = ({ navigation }) => {
   const [incognito, setIncognito] = useState(false);
+  const { logout } = useAuth();
   const handleBack = () => navigation.goBack();
   
   const handleLogout = async () => {
     try {
-      await AsyncStorage.clear();
+      // Call AuthContext logout to clear all state and Clerk sessions
+      await logout();
+      
       Alert.alert('Logged Out', 'You have been successfully logged out.');
       navigation.reset({
         index: 0,
@@ -37,7 +44,7 @@ const Settings = ({ navigation }) => {
   const handleDeleteAccount = () => {/* TODO: Add delete account logic */};
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <TopHeader title="Settings" onBack={handleBack} />
       <View style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -92,7 +99,7 @@ const Settings = ({ navigation }) => {
           <HollowButton title="Delete Account" onPress={handleDeleteAccount} style={styles.deleteButton} />
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -100,7 +107,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingTop: 32,
   },
   scrollContent: {
     paddingHorizontal: 20,

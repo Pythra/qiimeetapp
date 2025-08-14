@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Platform, Alert, TouchableOpacity, Image } from 'react-native';
+import { View, Platform, Alert, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import OnboardingTemplate from './OnboardingTemplate';
 import styles from './onboardingStyles';
@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PhotosScreen = ({ navigation }) => {
   const [selectedImages, setSelectedImages] = useState(Array(6).fill(null));
   const [profilePictureUrls, setProfilePictureUrls] = useState(Array(6).fill(null));
+  const [uploadingIndex, setUploadingIndex] = useState(null); // Track which grid is loading
   const [uploading, setUploading] = useState(false);
 
   // Request permissions for image picker
@@ -62,7 +63,9 @@ const PhotosScreen = ({ navigation }) => {
 
   const handleImageSelection = async (index) => {
     const permissionGranted = await requestPermissions();
-    if (!permissionGranted) return;
+    if (!permissionGranted) {
+      return;
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -71,25 +74,27 @@ const PhotosScreen = ({ navigation }) => {
         quality: 0.8,
       });
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setUploading(true);
-        const uri = result.assets[0].uri;
-        // Upload to backend
-        const url = await uploadImageToBackend(uri);
-        setUploading(false);
+        // Instantly show local preview
+        const asset = result.assets[0];
+        const updatedImages = [...selectedImages];
+        updatedImages[index] = asset;
+        setSelectedImages(updatedImages);
+
+        // Upload in background and then attach the URL
+        setUploadingIndex(index);
+        const url = await uploadImageToBackend(asset.uri);
         if (url) {
-          // Update local image and url arrays
-          const updatedImages = [...selectedImages];
-          updatedImages[index] = result.assets[0];
-          setSelectedImages(updatedImages);
           const updatedUrls = [...profilePictureUrls];
           updatedUrls[index] = url;
           setProfilePictureUrls(updatedUrls);
-          console.log('Selected images after upload:', updatedImages);
-          console.log('Profile picture URLs after upload:', updatedUrls);
+        } else {
+          // Keep preview but no URL means it won't count toward Next until re-upload
+          Alert.alert('Upload Error', 'Could not upload this photo. Please try again.');
         }
+        setUploadingIndex(null);
       }
     } catch (error) {
-      setUploading(false);
+      setUploadingIndex(null);
       console.log('Error in handleImageSelection:', error);
       Alert.alert('Error', 'Failed to pick or upload image');
     }
@@ -161,6 +166,11 @@ const PhotosScreen = ({ navigation }) => {
                   source={{ uri: image.uri }}
                   style={styles.uploadedImage}
                 />
+                {uploadingIndex === index && (
+                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' }}>
+                    <ActivityIndicator size={28} color="#fff" />
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.removeIconButton}
                   onPress={() => handleRemoveImage(index)}
@@ -169,6 +179,10 @@ const PhotosScreen = ({ navigation }) => {
                     <Feather name="x" size={12} color="#000" />
                   </View>
                 </TouchableOpacity>
+              </View>
+            ) : uploadingIndex === index ? (
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size={32} color="#fff" style={{ opacity: 0.7 }} />
               </View>
             ) : (
               <Feather name="plus" size={32} color="#fff" style={{ opacity: 0.7}} />

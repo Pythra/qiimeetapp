@@ -42,7 +42,11 @@ const Language = ({ navigation }) => {
       </ScrollView>
       <TouchableOpacity
         style={[styles.doneButton, { backgroundColor: search.trim() ? '#EC066A' : '#292929' }]}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => {
+          if (search.trim()) {
+            navigation.navigate('EditProfile', { languages: [search.trim()] });
+          }
+        }}
         disabled={!search.trim()}
       >
         <Text style={styles.doneButtonText}>Done</Text>

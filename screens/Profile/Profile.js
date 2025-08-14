@@ -6,10 +6,9 @@ import BlockReportModals from './BlockReportModals';
 import { FontAwesome6 } from '@expo/vector-icons'; 
 import Svg, { Circle } from 'react-native-svg';
 import ProfileEditIcon from '../../assets/profileedit.png';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-import { API_BASE_URL } from '../../env';
-import { useIsFocused } from '@react-navigation/native';
+import { useAuth } from '../../components/AuthContext';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -17,13 +16,40 @@ const getResponsiveWidth = (phoneWidth, tabletWidth) => isTablet ? tabletWidth :
 const getResponsiveFontSize = (phoneSize, tabletSize) => isTablet ? tabletSize : phoneSize;
 const getResponsiveSpacing = (phoneSpacing, tabletSpacing) => isTablet ? tabletSpacing : phoneSpacing;
 
+const goalIconMap = {
+  'Find a Life Partner': require('../../assets/ring.png'),
+  'Find a Long-Term Partner': require('../../assets/heart.png'),
+  'Find a Long-Term Connection': require('../../assets/connect.png'),
+  'Find a Short-Term Connection': require('../../assets/revolve.png'),
+  'Build a Future Together': require('../../assets/house.png'),
+};
+
 const ProfileScreen = ({ navigation, route }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { user, initialized, loading, logout, refreshAllData, getImageSource, getProfileImageSource, dataReady } = useAuth();
   const [blockModalVisible, setBlockModalVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [failedImages, setFailedImages] = useState(new Set());
   const isFocused = useIsFocused();
+
+  // Automatically refresh user data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      // Only refresh if we have a user and the context is initialized
+      // Add a flag to prevent multiple refreshes
+      if (initialized && !loading && user && user._id) {
+        // Only refresh if we haven't refreshed recently and data is not ready
+        const lastRefresh = Date.now();
+        if (!user.lastRefresh || (lastRefresh - user.lastRefresh) > 30000) { // 30 seconds
+          // Only refresh if data is not already ready
+          if (!dataReady) {
+            refreshAllData();
+          }
+        }
+      } else if (!user && initialized && !loading) {
+        refreshAllData();
+      }
+    }, [initialized, loading, user?._id, refreshAllData, dataReady])
+  );
 
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -38,30 +64,8 @@ const ProfileScreen = ({ navigation, route }) => {
     return age;
   };
 
-  
-
-  const getImageSource = (imagePath) => {
-    const cloudFrontUrl = 'https://dk665xezaubcy.cloudfront.net';
-    if (!imagePath) return require('../../assets/model.jpg'); // Default image
-    
-    console.log('Processing image path:', imagePath);
-    
-    if (imagePath.startsWith('http')) {
-      return { uri: imagePath, cache: 'force-cache' };
-    }
-    if (imagePath.startsWith('/uploads/')) {
-      return { uri: `${cloudFrontUrl}${imagePath}`, cache: 'force-cache' };
-    }
-    if (!imagePath.startsWith('/')) {
-      return { uri: `${cloudFrontUrl}/uploads/images/${imagePath}`, cache: 'force-cache' };
-    }
-    console.log('Using fallback image for:', imagePath);
-    return require('../../assets/model.jpg'); // Fallback
-  };
-
   // Handle image loading errors
   const handleImageError = (imagePath, error) => {
-    console.log('Image error for:', imagePath, error.nativeEvent);
     setFailedImages(prev => new Set([...prev, imagePath]));
     
     // Retry the image after a delay
@@ -74,78 +78,58 @@ const ProfileScreen = ({ navigation, route }) => {
     }, 5000); // Retry after 5 seconds
   };
 
-  // Check what files are available in uploads directory
-  const checkUploadsDirectory = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/debug/uploads`);
-      console.log('Uploads directory contents:', response.data);
-    } catch (error) {
-      console.log('Failed to check uploads directory:', error.message);
-    }
-  };
-
-  // Fetch user profile from backend
-  const fetchUserProfile = async () => {
-    try {
-      setLoading(true);
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        Alert.alert('Error', 'No authentication token found');
-        return;
-      }
-
-      const response = await axios.get(`${API_BASE_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      const userData = response.data;
-      console.log('Fetched user data:', userData);
-      console.log('Profile pictures:', userData.profilePictures);
-      
-      // Check uploads directory after fetching user data
-      await checkUploadsDirectory();
-      
-      setUser(userData);
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      Alert.alert('Error', 'Failed to load profile data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchUserProfile();
-  }, []);
-
-  // Refetch profile when screen is focused
-  useEffect(() => {
-    if (isFocused) {
-      fetchUserProfile();
-    }
-  }, [isFocused]);
-
-  // Show loading state
-  if (loading) {
+  // Show loading state if data is not ready yet
+  if (!initialized || loading || !dataReady) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#C40CF2" />
-      </View>
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}> 
+        <ActivityIndicator size="large" color="#EC066A" />
+      </SafeAreaView>
     );
   }
 
   // Show error state if no user data
   if (!user) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#fff', fontSize: 16 }}>Failed to load profile</Text>
-        <TouchableOpacity onPress={fetchUserProfile} style={{ marginTop: 10, padding: 10, backgroundColor: '#EC066A', borderRadius: 8 }}>
-          <Text style={{ color: '#fff' }}>Retry</Text>
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}> 
+        <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center', marginBottom: 20 }}>
+          Failed to load profile
+        </Text>
+        <TouchableOpacity 
+          onPress={async () => {
+            try {
+              await refreshAllData();
+            } catch (error) {
+              // Silent error handling
+            }
+          }} 
+          style={{ marginBottom: 10, padding: 12, backgroundColor: '#4CAF50', borderRadius: 8, minWidth: 120 }}
+        >
+          <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>Retry</Text>
         </TouchableOpacity>
-      </View>
+        <TouchableOpacity 
+          onPress={async () => {
+            try {
+              // Call AuthContext logout to clear all state and Clerk sessions
+              await logout();
+              
+              // Navigate to Landing screen and reset navigation stack
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Landing' }],
+              });
+            } catch (error) {
+              // Force navigation even if logout fails
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Landing' }],
+              });
+            }
+          }} 
+          style={{ padding: 12, backgroundColor: '#EC066A', borderRadius: 8, minWidth: 120 }}
+        >
+          <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>Logout</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     );
   }
 
@@ -155,16 +139,54 @@ const ProfileScreen = ({ navigation, route }) => {
     : require('../../assets/model.jpg');
 
   // Calculate profile completion percentage
-  const profileFields = ['username', 'goal', 'height', 'interests', 'kids', 'career', 'zodiac', 'education', 'personality', 'religon', 'lifestyle', 'location', 'age', 'profilePictures'];
+  const profileFields = [
+    'username', 
+    'goal', 
+    'height', 
+    'interests', 
+    'kids', 
+    'career', 
+    'zodiac', 
+    'education', 
+    'personality', 
+    'religon', 
+    'lifestyle', 
+    'location', 
+    'dateOfBirth', 
+    'profilePictures'
+  ];
+  
   const completedFields = profileFields.filter(field => {
-    if (field === 'profilePictures') return user[field] && user[field].length >= 2;
-    if (field === 'interests' || field === 'lifestyle') return user[field] && user[field].length > 0;
-    return user[field] && user[field] !== '';
+    switch (field) {
+      case 'profilePictures':
+        return user[field] && user[field].length >= 2;
+      case 'interests':
+      case 'lifestyle':
+        return user[field] && Array.isArray(user[field]) && user[field].length > 0;
+      case 'dateOfBirth':
+        return user[field] && user[field] !== '';
+      case 'username':
+      case 'goal':
+      case 'height':
+      case 'kids':
+      case 'career':
+      case 'zodiac':
+      case 'education':
+      case 'personality':
+      case 'religon':
+      case 'location':
+        return user[field] && user[field] !== '' && user[field] !== null && user[field] !== undefined;
+      default:
+        return false;
+    }
   }).length;
+  
   const completionPercentage = Math.round((completedFields / profileFields.length) * 100);
+  
+  // Profile completion calculation (silent)
 
   return ( 
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <BlockReportModals
         blockModalVisible={blockModalVisible}
         setBlockModalVisible={setBlockModalVisible}
@@ -211,7 +233,6 @@ const ProfileScreen = ({ navigation, route }) => {
                 source={profileImage} 
                 style={styles.profileImage}
                 onError={(error) => handleImageError(profileImage.uri, error)}
-                onLoad={() => console.log('Profile image loaded successfully')}
                 key={profileImage.uri + (failedImages.has(profileImage.uri) ? '-retry' : '')}
               />
             </View>
@@ -239,9 +260,9 @@ const ProfileScreen = ({ navigation, route }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>My Goal</Text>
           <View style={styles.goalContainer}>
-            <Image 
-              source={require('../../assets/ring.png')}
-              style={{ width: 16, height: 16 }}
+            <Image
+              source={goalIconMap[user.goal] || require('../../assets/ring.png')}
+              style={{ width: 24, height: 24, marginRight: 8 }}
             />
             <Text style={styles.goalText}>{user.goal || 'Goal not set'}</Text>
           </View>
@@ -293,7 +314,6 @@ const ProfileScreen = ({ navigation, route }) => {
                       source={getImageSource(photo)}
                       style={styles.photo}
                       onError={(error) => handleImageError(photo, error)}
-                      onLoad={() => console.log('Gallery image loaded successfully for:', photo)}
                       key={photo + (failedImages.has(photo) ? '-retry' : '')}
                     />
                   </TouchableOpacity>
@@ -345,15 +365,15 @@ const ProfileScreen = ({ navigation, route }) => {
           </View>
         </View>
       </ScrollView>
-    </View> 
+    </SafeAreaView> 
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212', 
-    paddingVertical: 40,
+    backgroundColor: '#121212',  
+    paddingVertical:16,
     marginBottom:56
   },
   header: {

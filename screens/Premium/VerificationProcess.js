@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import TopHeader from '../../components/TopHeader';
 import CustomButton from '../../constants/button';
@@ -301,43 +301,46 @@ We'll send you a code to verify your email address.       </Text>
     <SafeAreaView style={styles.container}>
       <TopHeader onBack={() => navigation.goBack()} />
       {console.log('isCurrentPhaseValid:', isCurrentPhaseValid(), 'formStep:', formStep, 'formData:', formData)}
-      <ScrollView 
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <PhaseContainer currentPhase={1} />
-        
-        <View style={styles.paginationContainer}>
-          {[1, 2, 3].map(index => (
-            <View
-              key={index}
-              style={[
-                styles.paginationDot,
-                formStep === index && styles.paginationDotActive
-              ]}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={90}>
+        <ScrollView 
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <PhaseContainer currentPhase={1} />
+          
+          <View style={styles.paginationContainer}>
+            {[1, 2, 3].map(index => (
+              <View
+                key={index}
+                style={[
+                  styles.paginationDot,
+                  formStep === index && styles.paginationDotActive
+                ]}
+              />
+            ))}
+          </View>
+          
+          {renderCurrentPhase()}
+          
+          <View style={styles.footer}>
+            <CustomButton 
+              title={getButtonTitle()}
+              onPress={handleButtonPress}
+              disabled={!isCurrentPhaseValid()}
+              backgroundColor={!isCurrentPhaseValid() ? '#4a4a4a' : '#ec066a'}
             />
-          ))}
-        </View>
-        
-        {renderCurrentPhase()}
-        
-        <View style={styles.footer}>
-          <CustomButton 
-            title={getButtonTitle()}
-            onPress={handleButtonPress}
-            disabled={!isCurrentPhaseValid()}
-            backgroundColor={!isCurrentPhaseValid() ? '#4a4a4a' : '#ec066a'}
-          />
-          {formStep === 3 && (
-            <View style={styles.resendRow}>
-              <Text style={styles.resendText}>Didn't get a code? </Text>
-              <TouchableOpacity>
-                <Text style={styles.resendCodeText}>Resend code</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+            {formStep === 3 && (
+              <View style={styles.resendRow}>
+                <Text style={styles.resendText}>Didn't get a code? </Text>
+                <TouchableOpacity>
+                  <Text style={styles.resendCodeText}>Resend code</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -350,7 +353,8 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 22,
     width: '100%',
-    flex: 1,
+    flexGrow: 1,
+    paddingBottom: 24,
   },
   phaseContainer: {
     flex: 1,

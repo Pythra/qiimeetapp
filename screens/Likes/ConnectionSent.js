@@ -9,6 +9,7 @@ import TopHeader from '../../components/TopHeader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../env';
 import axios from 'axios';
+import EventEmitter from '../../utils/eventEmitter';
 const ConnectionSent = ({ route }) => {
   const navigation = useNavigation();
   const [modalVisible, setModalVisible] = useState(false);
@@ -85,6 +86,28 @@ const ConnectionSent = ({ route }) => {
     return () => clearInterval(timer);
   }, [sentAtRef.current]);
 
+  // Listen for connection acceptance via EventEmitter (global handling)
+  useEffect(() => {
+    const handleConnectionAccepted = (data) => {
+      // Navigate to AcceptedConnection screen when connection is accepted
+      // This is now handled globally, but we can still navigate if needed
+      if (data.targetUserId === targetUserId) {
+        navigation.replace('AcceptedConnection', { 
+          targetUserId,
+          acceptedBy: data.accepterId || targetUserId 
+        });
+      }
+    };
+
+    // Listen to EventEmitter for global events
+    EventEmitter.on('connection_accepted', handleConnectionAccepted);
+
+    // Cleanup listeners on unmount
+    return () => {
+      EventEmitter.off('connection_accepted', handleConnectionAccepted);
+    };
+  }, [targetUserId, navigation]);
+
   const formatTime = (seconds) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -124,11 +147,11 @@ const ConnectionSent = ({ route }) => {
 
         <Text style={styles.time}>{formatTime(timeLeft)}</Text>
 
-        <HollowButton
-          title="Cancel"
-          onPress={handleCancel}
-          style={styles.cancelButton}
-        />
+                 <HollowButton
+           title="Cancel"
+           onPress={handleCancel}
+           style={styles.cancelButton}
+         />
       </View>
 
       <Modal

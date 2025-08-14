@@ -42,7 +42,6 @@ const CircularProgress = ({ step, total }) => {
   );
 };
 
-
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',

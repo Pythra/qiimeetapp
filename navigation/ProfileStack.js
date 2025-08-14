@@ -32,6 +32,12 @@ const ProfileStack = () => {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
+        animationEnabled: false,
+        animationTypeForReplace: 'none',
+        gestureEnabled: false,
+        cardStyleInterpolator: () => ({
+          cardStyle: { opacity: 1 },
+        }),
       }}>
       <Stack.Screen name="ProfileScreen" component={ProfileScreen} />    
       <Stack.Screen name="EditProfile" component={EditProfile} />

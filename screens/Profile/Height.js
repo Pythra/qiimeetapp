@@ -4,8 +4,14 @@ import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
 
 const heightOptions = [
-  { label: `5'2" (157 cm)`, value: '5_2' },
-  { label: `5'6" (168 cm)`, value: '5_6' },
+  "4'6\" (137 cm)", "4'7\" (140 cm)", "4'8\" (142 cm)", "4'9\" (145 cm)", "4'10\" (147 cm)", "4'11\" (150 cm)",
+  "5'0\" (152 cm)", "5'1\" (155 cm)", "5'2\" (157 cm)", "5'3\" (160 cm)", "5'4\" (163 cm)", "5'5\" (165 cm)",
+  "5'6\" (168 cm)", "5'7\" (170 cm)", "5'8\" (173 cm)", "5'9\" (175 cm)", "5'10\" (178 cm)", "5'11\" (180 cm)",
+  "6'0\" (183 cm)", "6'1\" (185 cm)", "6'2\" (188 cm)", "6'3\" (191 cm)", "6'4\" (193 cm)", "6'5\" (196 cm)",
+  "6'6\" (198 cm)", "6'7\" (201 cm)", "6'8\" (203 cm)", "6'9\" (206 cm)", "6'10\" (208 cm)", "6'11\" (211 cm)", "7'0\" (213 cm)",
+  // Add more granular options as in AboutYouScreen
+  "4'0\" (122 cm)", "4'1\" (124 cm)", "4'2\" (127 cm)", "4'3\" (130 cm)", "4'4\" (132 cm)", "4'5\" (135 cm)",
+  "5'12\" (182 cm)", "7'1\" (216 cm)", "7'2\" (218 cm)", "7'3\" (221 cm)", "7'4\" (224 cm)", "7'5\" (226 cm)", "7'6\" (229 cm)"
 ];
 
 const Height = ({ navigation }) => {
@@ -17,7 +23,7 @@ const Height = ({ navigation }) => {
       <View style={styles.optionsArea}>
         {heightOptions.map((option, idx) => (
           <TouchableOpacity
-            key={option.value}
+            key={option}
             style={styles.heightOption}
             activeOpacity={0.7}
             onPress={() => setSelectedIndex(idx)}
@@ -31,13 +37,21 @@ const Height = ({ navigation }) => {
                 },
               ]}
             >
-              {option.label}
+              {option}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      <TouchableOpacity style={styles.button} activeOpacity={0.8}>
-        <Text style={styles.buttonText}>Select your height</Text>
+      <TouchableOpacity
+        style={[styles.doneButton, { backgroundColor: selectedIndex === null ? '#292929' : '#ec066a' }]}
+        disabled={selectedIndex === null}
+        onPress={() => {
+          if (selectedIndex !== null) {
+            navigation.navigate('EditProfile', { height: heightOptions[selectedIndex] });
+          }
+        }}
+      >
+        <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>
     </View>
   );
@@ -72,6 +86,21 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: FONTS.regular,
+    fontWeight: '600',
+  },
+  doneButton: {
+    backgroundColor: '#292929',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center', 
+    width: '90%',
+    alignSelf: 'center',
+    marginTop: 20,
+  },
+  doneButtonText: {
     color: '#fff',
     fontSize: 16,
     fontFamily: FONTS.regular,

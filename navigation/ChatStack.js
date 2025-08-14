@@ -5,6 +5,7 @@ import ChatInterface from '../screens/Chat/ChatInterface'; // Add this import
 import VoiceCall from '../screens/Chat/VoiceCall';
 import VideoCall from '../screens/Chat/VideoCall'; // Add this import
 import Notification from '../screens/Chat/Notification';
+import IncomingCall from '../screens/Chat/IncomingCall';
 
 const Stack = createStackNavigator();
 
@@ -27,6 +28,7 @@ const ChatStack = () => {
       <Stack.Screen name="VoiceCall" component={VoiceCall} />  
       <Stack.Screen name="VideoCall" component={VideoCall} /> 
       <Stack.Screen name="Notification" component={Notification} />
+      <Stack.Screen name="IncomingCall" component={IncomingCall} />
     </Stack.Navigator>
   );
 };

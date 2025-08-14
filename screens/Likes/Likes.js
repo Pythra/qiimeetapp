@@ -10,6 +10,8 @@ import ConnectionLimitModal from './ConnectionLimitModal';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../env';
+import { useAuth } from '../../components/AuthContext';
+import SocketManager from '../../utils/socket';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -37,17 +39,19 @@ const getCardWidth = () => {
 };
 
 const LikesScreen = ({ navigation }) => {
+  const { user: currentUser, allUsers, updateUser, getImageSource, getProfileImageSource, dataReady, loading, initialized } = useAuth();
   const [activeTab, setActiveTab] = useState('yourLikes');
   const [modalVisible, setModalVisible] = useState(false);
   const [limitModalVisible, setLimitModalVisible] = useState(false);
   const [likedUsers, setLikedUsers] = useState([]);
   const [usersWhoLikeYou, setUsersWhoLikeYou] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activeConnections, setActiveConnections] = useState([]);
+
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
   const [remainingConnections, setRemainingConnections] = useState(0);
+  const [removingLike, setRemovingLike] = useState(null);
 
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -66,44 +70,58 @@ const LikesScreen = ({ navigation }) => {
     return age;
   };
 
+  const shallowEqualArray = (arr1, arr2) => {
+    if (arr1.length !== arr2.length) return false;
+    for (let i = 0; i < arr1.length; i++) {
+      if (typeof arr1[i] === 'object' && typeof arr2[i] === 'object') {
+        if (JSON.stringify(arr1[i]) !== JSON.stringify(arr2[i])) return false;
+      } else {
+        if (arr1[i] !== arr2[i]) return false;
+      }
+    }
+    return true;
+  };
+
+  const shallowEqualObject = (obj1, obj2) => {
+    if (!obj1 || !obj2) return false;
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+    if (keys1.length !== keys2.length) return false;
+    for (let key of keys1) {
+      if (obj1[key] !== obj2[key]) return false;
+    }
+    return true;
+  };
+
   const fetchUsers = async (isRefreshing = false) => {
     try {
       if (isRefreshing) {
         setRefreshing(true);
-      } else {
-        setLoading(true);
       }
       setError(null);
-      const token = await AsyncStorage.getItem('token');
-      if (!token) throw new Error('No token');
       
-      // Fetch current user profile to get likes and likers
-      const profileRes = await axios.get(`${API_BASE_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const currentUserData = profileRes.data;
-      const likes = currentUserData.likes || [];
-      const likers = currentUserData.likers || [];
-      const connections = currentUserData.connections || [];
-      const requests = currentUserData.requests || []; // Users I've sent requests to
-      const requesters = currentUserData.requesters || []; // Users who've sent me requests
-      const currentUserId = currentUserData._id;
+      if (!currentUser) return;
       
-      // Set current user data and log allowed connections
-      setCurrentUser(currentUserData);
-      // Calculate usedConnections: accepted + pending
-      const accepted = Array.isArray(currentUserData.connections) ? currentUserData.connections.length : 0;
-      const pending = Array.isArray(currentUserData.requests) ? currentUserData.requests.length : 0;
-      const usedConnections = accepted + pending;
-      const allowed = currentUserData.allowedConnections || 0;
-      setRemainingConnections(allowed - usedConnections);
+      const likes = currentUser.likes || [];
+      const likers = currentUser.likers || [];
+      const connections = currentUser.connections || [];
+      const requests = currentUser.requests || [];
+      const requesters = currentUser.requesters || [];
+      const currentUserId = currentUser._id;
       
-      // Fetch all users with complete data
-      const allUsersRes = await axios.get(`${API_BASE_URL}/admin/users/home`);
-      const allUsers = allUsersRes.data.users || [];
+      setRemainingConnections((currentUser.allowedConnections || 0) - ((currentUser.connections?.length || 0) + (currentUser.requests?.length || 0)));
       
-      // Filter to only include users that the current user has liked AND are not already connected or have pending requests
-      const likedUsersData = allUsers.filter(user => 
+      // Use AuthContext allUsers data if available, otherwise fetch
+      let usersData = [];
+      if (allUsers && allUsers.length > 0) {
+        usersData = allUsers;
+      } else {
+        // Fetch all users with complete data only if not available in context
+        const allUsersRes = await axios.get(`${API_BASE_URL}/admin/users/home`);
+        usersData = allUsersRes.data.users || [];
+      }
+      
+      const likedUsersData = usersData.filter(user => 
         likes.includes(user._id) && 
         user._id !== currentUserId && 
         !connections.includes(user._id)
@@ -112,8 +130,7 @@ const LikesScreen = ({ navigation }) => {
         isPending: requests.includes(user._id) || requesters.includes(user._id)
       }));
       
-      // Filter to only include users who like the current user AND are not already connected or have pending requests
-      const usersWhoLikeYouData = allUsers.filter(user => 
+      const usersWhoLikeYouData = usersData.filter(user => 
         likers.includes(user._id) && 
         user._id !== currentUserId && 
         !connections.includes(user._id)
@@ -121,18 +138,105 @@ const LikesScreen = ({ navigation }) => {
         ...user,
         isPending: requests.includes(user._id) || requesters.includes(user._id)
       }));
+
+      // Get active connections data
+      const activeConnectionsData = usersData.filter(user => 
+        connections.includes(user._id) && 
+        user._id !== currentUserId
+      );
       
-      setLikedUsers(likedUsersData);
-      setUsersWhoLikeYou(usersWhoLikeYouData);
+
+      
+      // Only update state if data has changed
+      setLikedUsers(prev => shallowEqualArray(prev, likedUsersData) ? prev : likedUsersData);
+      setUsersWhoLikeYou(prev => shallowEqualArray(prev, usersWhoLikeYouData) ? prev : usersWhoLikeYouData);
+      setActiveConnections(prev => shallowEqualArray(prev, activeConnectionsData) ? prev : activeConnectionsData);
+      
     } catch (err) {
       console.error('Error fetching users:', err);
       setError('Failed to load users');
     } finally {
       if (isRefreshing) {
         setRefreshing(false);
-      } else {
-        setLoading(false);
       }
+    }
+  };
+
+  // Socket listeners are handled in AuthContext, no need to duplicate here
+
+  // Process user data when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      // Process the data immediately without any loading state
+      const likes = currentUser.likes || [];
+      const likers = currentUser.likers || [];
+      const connections = currentUser.connections || [];
+      const requests = currentUser.requests || [];
+      const requesters = currentUser.requesters || [];
+      const currentUserId = currentUser._id;
+      
+      setRemainingConnections((currentUser.allowedConnections || 0) - ((currentUser.connections?.length || 0) + (currentUser.requests?.length || 0)));
+      
+      // Use AuthContext allUsers data if available
+      if (allUsers && allUsers.length > 0) {
+        const likedUsersData = allUsers.filter(user => 
+          likes.includes(user._id) && 
+          user._id !== currentUserId && 
+          !connections.includes(user._id)
+        ).map(user => ({
+          ...user,
+          isPending: requests.includes(user._id) || requesters.includes(user._id)
+        }));
+        
+        const usersWhoLikeYouData = allUsers.filter(user => 
+          likers.includes(user._id) && 
+          user._id !== currentUserId && 
+          !connections.includes(user._id)
+        ).map(user => ({
+          ...user,
+          isPending: requests.includes(user._id) || requesters.includes(user._id)
+        }));
+
+        // Get active connections data
+        const activeConnectionsData = allUsers.filter(user => 
+          connections.includes(user._id) && 
+          user._id !== currentUserId
+        );
+        
+
+        
+        setLikedUsers(likedUsersData);
+        setUsersWhoLikeYou(usersWhoLikeYouData);
+        setActiveConnections(activeConnectionsData);
+      } else {
+        // Fetch users data if not available in AuthContext
+        fetchUsers();
+      }
+      
+      // Clean up any inconsistencies in the background
+      cleanupInconsistencies();
+    }
+  }, [currentUser, allUsers]);
+
+  // Function to clean up inconsistencies
+  const cleanupInconsistencies = async () => {
+    if (!currentUser) return;
+    
+    try {
+      const token = await AsyncStorage.getItem('token');
+      
+      // Call the user-specific cleanup endpoint to fix any inconsistencies
+      await axios.post(`${API_BASE_URL}/auth/cleanup-user-likers-inconsistencies`, {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      
+    } catch (error) {
+      console.error('Error cleaning up inconsistencies:', error);
+      // Don't show error to user as this is a background operation
     }
   };
 
@@ -140,37 +244,131 @@ const LikesScreen = ({ navigation }) => {
     fetchUsers(true);
   }, []);
 
-  // Initial load
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   // Refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      fetchUsers();
-    }, [])
+      if (currentUser) {
+        // Process existing data without any loading state
+        const likes = currentUser.likes || [];
+        const likers = currentUser.likers || [];
+        const connections = currentUser.connections || [];
+        const requests = currentUser.requests || [];
+        const requesters = currentUser.requesters || [];
+        const currentUserId = currentUser._id;
+        
+  
+        
+        
+        
+        
+        
+        setRemainingConnections((currentUser.allowedConnections || 0) - ((currentUser.connections?.length || 0) + (currentUser.requests?.length || 0)));
+        
+        if (allUsers && allUsers.length > 0) {
+          const likedUsersData = allUsers.filter(user => 
+            likes.includes(user._id) && 
+            user._id !== currentUserId && 
+            !connections.includes(user._id)
+          ).map(user => ({
+            ...user,
+            isPending: requests.includes(user._id) || requesters.includes(user._id)
+          }));
+          
+          const usersWhoLikeYouData = allUsers.filter(user => 
+            likers.includes(user._id) && 
+            user._id !== currentUserId && 
+            !connections.includes(user._id)
+          ).map(user => ({
+            ...user,
+            isPending: requests.includes(user._id) || requesters.includes(user._id)
+          }));
+
+          // Get active connections data
+          const activeConnectionsData = allUsers.filter(user => 
+            connections.includes(user._id) && 
+            user._id !== currentUserId
+          );
+          
+
+          
+          setLikedUsers(likedUsersData);
+          setUsersWhoLikeYou(usersWhoLikeYouData);
+          setActiveConnections(activeConnectionsData);
+        } else {
+          // Fetch users data if not available in AuthContext
+          fetchUsers();
+        }
+        
+        // Clean up any inconsistencies in the background
+        cleanupInconsistencies();
+        
+        // Force refresh user data to get latest likers
+        refreshUserData();
+      }
+    }, [currentUser, allUsers])
   );
+
+  // Function to manually refresh user data
+  const refreshUserData = async () => {
+    if (!currentUser) return;
+    
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      
+      updateUser(response.data);
+    } catch (error) {
+      console.error('Error refreshing user data:', error);
+    }
+  };
 
   const handleConnect = () => {
     setModalVisible(false);
     navigation.navigate('ConnectionSent');
   };
 
+  // Add helper to check if user can connect at all
+  const canConnectGlobally = () => {
+    if (!currentUser) return false;
+    const hasActiveConnection = currentUser.connections && currentUser.connections.length > 0;
+    const hasPendingRequest = currentUser.requests && currentUser.requests.length > 0;
+    // Removed hasTicket from overlay criteria
+    return !hasActiveConnection && !hasPendingRequest;
+  };
+
+  // Add helper to check if user has existing connections or requests
+  const hasExistingConnectionOrRequest = () => {
+    if (!currentUser) return false;
+    const hasActiveConnection = currentUser.connections && currentUser.connections.length > 0;
+    const hasPendingRequest = currentUser.requests && currentUser.requests.length > 0;
+    return hasActiveConnection || hasPendingRequest;
+  };
+
   const openConnectionModal = (userId) => {
-    
     if (!userId) {
       console.error('No userId provided to openConnectionModal');
       return;
     }
     
-    // Check if user has remaining connections
-    if (remainingConnections <= 0) {
-      console.log('No remaining connections, showing limit modal');
+    // FIRST: Check if user already has a connection or pending request
+    if (hasExistingConnectionOrRequest()) {
       setLimitModalVisible(true);
       return;
     }
     
+    // SECOND: If no existing connections/requests, check if user has allowed connections
+    if (currentUser && (!currentUser.allowedConnections || currentUser.allowedConnections <= 0)) {
+      setLimitModalVisible(true);
+      return;
+    }
+    
+    // If we get here, user can connect
     setSelectedUserId(userId);
     setModalVisible(true);
   };
@@ -210,48 +408,116 @@ const LikesScreen = ({ navigation }) => {
     }
   };
 
-  const getImageSource = (imagePath) => {
-    const cloudFrontUrl = 'https://dk665xezaubcy.cloudfront.net';
-    if (!imagePath) return require('../../assets/model.jpg');
-    if (imagePath.startsWith('http')) {
-      return { uri: imagePath, cache: 'force-cache' };
+  const handleRemoveLike = async (userId) => {
+    if (!currentUser || !userId) return;
+    
+    try {
+      setRemovingLike(userId);
+      const token = await AsyncStorage.getItem('token');
+      
+      // Remove the user from current user's likes
+      const updatedLikes = (currentUser.likes || []).filter(id => id !== userId);
+      
+      // Call the backend to update likes/dislikes
+      const response = await axios.put(`${API_BASE_URL}/auth/update-likes-dislikes`, {
+        likes: updatedLikes,
+        dislikes: currentUser.dislikes || []
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // Update the user context with the new data
+      updateUser(response.data);
+      
+    } catch (error) {
+      console.error('Error removing like:', error);
+      // Optionally show an error message to the user
+    } finally {
+      setRemovingLike(null);
     }
-    if (imagePath.startsWith('/uploads/')) {
-      return { uri: `${cloudFrontUrl}${imagePath}`, cache: 'force-cache' };
-    }
-    if (!imagePath.startsWith('/')) {
-      return { uri: `${cloudFrontUrl}/uploads/images/${imagePath}`, cache: 'force-cache' };
-    }
-    return require('../../assets/model.jpg');
+  };
+
+  const renderActiveConnection = (user) => {
+    const handleConnectionPress = () => {
+      // Navigate to chat with this user using nested navigation
+      navigation.navigate('Chat', {
+        screen: 'ChatInterface',
+        params: {
+          otherUserId: user._id,
+          senderId: user._id, // For compatibility
+          chatId: `${currentUser._id}-${user._id}` // Construct chat ID
+        }
+      });
+    };
+
+    return (
+      <TouchableOpacity 
+        key={`active-connection-${user._id}`}
+        style={styles.activeConnectionCard}
+        onPress={handleConnectionPress}
+      >
+        <View style={styles.activeConnectionContent}>
+          <Image 
+            source={getProfileImageSource(user)}
+            style={styles.activeConnectionImage}
+          />
+          <View style={styles.activeConnectionInfo}>
+            <Text style={styles.activeConnectionName}>
+              {user.username || user.name}
+              {(user.age || calculateAge(user.dateOfBirth)) ? `, ${user.age || calculateAge(user.dateOfBirth)}` : ''}
+            </Text>
+            <View style={styles.verifiedContainer}>
+              <MaterialIcons name="verified" size={16} color="#ec066a" />
+            </View>
+          </View>
+        </View>
+        <TouchableOpacity style={styles.messageButton}>
+          <Image 
+            source={require('../../assets/tab_icons/chat.png')}
+            style={styles.messageIcon}
+          />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
   };
 
   const renderUserCard = (user, index) => {
     const cardWidth = getCardWidth();
     const cardHeight = cardWidth * 1.2;
-    const disableConnect = user.isPending || remainingConnections <= 0;
+    // Check if this user is the one with a pending request
+    const isPendingRequestToThisUser = currentUser && currentUser.requests && currentUser.requests.includes(user._id);
+    // Disable connect if user cannot connect globally (but allow if this is the pending request user)
+    const disableConnect = !canConnectGlobally() && !isPendingRequestToThisUser;
     return (
       <View key={user._id} style={[styles.cardContainer, { width: cardWidth, height: cardHeight }]}> 
-        {/* Overlay for pending requests/requesters or no remaining connections */}
-        {(user.isPending || remainingConnections <= 0) && (
+        {/* Overlay for global connect limit, but allow navigation to ConnectionSent if this is the pending request target */}
+        {disableConnect && (
           <TouchableOpacity
             style={styles.pendingOverlay}
             activeOpacity={0.7}
-            onPress={() => {
-              if (user.isPending) {
-                handleOverlayPress(user);
-              } else if (remainingConnections <= 0) {
-                setLimitModalVisible(true);
-              }
-            }}
+            onPress={() => setLimitModalVisible(true)}
           />
         )}
-        <TouchableOpacity style={styles.removeButton} disabled={disableConnect}>
-          <Image 
-            source={require('../../assets/close.png')}
-            style={styles.closeIcon}
-          />
+        <TouchableOpacity 
+          style={[styles.removeButton, removingLike === user._id && styles.removingButton]} 
+          onPress={() => handleRemoveLike(user._id)}
+          disabled={removingLike === user._id}
+        >
+          {removingLike === user._id ? (
+            <View style={styles.loadingSpinner}>
+              <Text style={styles.loadingText}>...</Text>
+            </View>
+          ) : (
+            <Image 
+              source={require('../../assets/icons/close.png')}
+              style={styles.closeIcon}
+            />
+          )}
         </TouchableOpacity>
-        <Image source={getImageSource(user.profilePictures?.[0])} style={styles.cardImage} />
+                        <Image source={getProfileImageSource(user)} style={styles.cardImage} />
         {/* User Info */}
         <View style={styles.userInfo} pointerEvents={disableConnect ? 'none' : 'auto'}>
           <View style={styles.status}>
@@ -278,35 +544,101 @@ const LikesScreen = ({ navigation }) => {
         <TouchableOpacity 
           style={styles.likeButton}
           onPress={() => {
-            if (!disableConnect) {
+            if (isPendingRequestToThisUser) {
+              handleOverlayPress(user);
+            } else {
               openConnectionModal(user._id || user.id);
-            } else if (user.isPending) {
-              navigation.navigate('ConnectionSent', { targetUserId: user._id });
-            } else if (remainingConnections <= 0) {
-              setLimitModalVisible(true);
             }
           }}
-          disabled={disableConnect}
+          disabled={disableConnect && !isPendingRequestToThisUser}
         >
           <Image 
-            source={require('../../assets/connicon.png')}
-            style={[styles.connIcon, disableConnect && { opacity: 0.4 }]}
+            source={require('../../assets/icons/connicon.png')}
+            style={[styles.connIcon, (disableConnect && !isPendingRequestToThisUser) && { opacity: 0.4 }]}
           />
         </TouchableOpacity>
       </View>
     );
   };
 
+  // Show loading state if data is not ready yet
+  if (!initialized || loading || !dataReady || !currentUser) {
+    return (
+      <View style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: '#fff' }}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show loading state if allUsers is not loaded yet (common after fresh sign-in)
+  if (!allUsers || allUsers.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Likes</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('ConnectionRequests')} style={{ position: 'relative' }}>
+            <Image 
+              source={require('../../assets/icons/flicon.png')}
+              style={styles.flicon}
+            />
+            {currentUser?.requesters?.length > 0 && (
+              <View style={styles.requestBadge}>
+                <Text style={styles.requestBadgeText}>{currentUser.requesters.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'yourLikes' && styles.activeTab]}
+            onPress={() => setActiveTab('yourLikes')}
+          >
+            <Text style={[styles.tabText, activeTab === 'yourLikes' && styles.activeTabText]}>
+              Your Likes
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'whoLikesYou' && styles.activeTab]}
+            onPress={() => setActiveTab('whoLikesYou')}
+          >
+            <Text style={[styles.tabText, activeTab === 'whoLikesYou' && styles.activeTabText]}>
+              Who Likes You
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Active Connection Section */}
+        {activeConnections.length > 0 && (
+          <View style={styles.activeConnectionSection}>
+            <Text style={styles.activeConnectionTitle}>Active Connection</Text>
+            {activeConnections.map(renderActiveConnection)}
+          </View>
+        )}
+        
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: '#fff' }}>Loading users...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Likes</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('ConnectionRequests')}>
+        <TouchableOpacity onPress={() => navigation.navigate('ConnectionRequests')} style={{ position: 'relative' }}>
           <Image 
-            source={require('../../assets/flicon.png')}
+            source={require('../../assets/icons/flicon.png')}
             style={styles.flicon}
           />
+          {currentUser?.requesters?.length > 0 && (
+            <View style={styles.requestBadge}>
+              <Text style={styles.requestBadgeText}>{currentUser.requesters.length}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
       <View style={styles.tabContainer}>
@@ -327,10 +659,17 @@ const LikesScreen = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
       </View>
-      {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>Loading...</Text></View>
-      ) : error ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>{error}</Text></View>
+      
+      {/* Active Connection Section */}
+      {activeConnections.length > 0 && (
+        <View style={styles.activeConnectionSection}>
+          <Text style={styles.activeConnectionTitle}>Active Connection</Text>
+          {activeConnections.map(renderActiveConnection)}
+        </View>
+      )}
+      
+      { error ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: '#fff' }}>{error}</Text></View>
       ) : (
         <ScrollView 
           contentContainerStyle={styles.cardsContainer}
@@ -338,7 +677,10 @@ const LikesScreen = ({ navigation }) => {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={onRefresh}
+              onRefresh={() => {
+                onRefresh();
+                refreshUserData();
+              }}
               tintColor="#ec066a"
               colors={["#ec066a"]}
             />
@@ -375,6 +717,7 @@ const LikesScreen = ({ navigation }) => {
         onUpgrade={handleUpgradeConnections}
         currentConnections={currentUser?.allowedConnections || 0}
         maxConnections={currentUser?.allowedConnections || 0}
+        hasPendingRequest={hasExistingConnectionOrRequest()}
       />
     </View>
   );
@@ -383,10 +726,10 @@ const LikesScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#121212',
     paddingTop: 24,
     
-    marginBottom:90
+    paddingBottom:90
   },
   header: {
     flexDirection: 'row',
@@ -510,11 +853,13 @@ const styles = StyleSheet.create({
   },
   likeButton: {
     position: 'absolute',
-    bottom: getResponsiveSpacing(12, 15),
-    right: getResponsiveSpacing(12, 15),
-    width: getResponsiveWidth(28, 35),
-    height: getResponsiveWidth(28, 35),
+    bottom: getResponsiveSpacing(4, 6),
+    right: getResponsiveSpacing(4, 6),
+    width: getResponsiveWidth(40, 48),
+    height: getResponsiveWidth(40, 48),
     zIndex: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   connIcon: {
     width: getResponsiveWidth(32, 40),
@@ -527,16 +872,108 @@ const styles = StyleSheet.create({
     right: getResponsiveSpacing(8, 10), 
     zIndex: 5,
   },
+  removingButton: {
+    opacity: 0.6,
+  },
   closeIcon: {
     width: getResponsiveWidth(16, 20),
     height: getResponsiveWidth(16, 20),
     resizeMode: 'contain',
+  },
+  loadingSpinner: {
+    width: getResponsiveWidth(16, 20),
+    height: getResponsiveWidth(16, 20),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: getResponsiveFontSize(12, 14),
+    fontWeight: 'bold',
   },
   pendingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(83, 83, 83, 0.3)',
     zIndex: 10,
     borderRadius: getResponsiveSpacing(10, 12),
+  },
+  requestBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: '#FF0000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    paddingHorizontal: 2,
+  },
+  requestBadgeText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 3,
+  },
+  // Active Connection Styles
+  activeConnectionSection: {
+    paddingHorizontal: getResponsiveSpacing(20, 40),
+    paddingVertical: 8,
+    marginBottom: getResponsiveSpacing(10, 15), 
+  },
+  activeConnectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: getResponsiveSpacing(12, 16),
+    fontFamily: FONTS.medium,
+  },
+  activeConnectionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    padding: getResponsiveSpacing(16, 20),
+  },
+  activeConnectionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  activeConnectionImage: {
+    width: getResponsiveWidth(50, 60),
+    height: getResponsiveWidth(50, 60),
+    borderRadius: getResponsiveWidth(25, 30),
+    marginRight: getResponsiveSpacing(12, 16),
+  },
+  activeConnectionInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeConnectionName: {
+    fontSize: getResponsiveFontSize(16, 18),
+    fontWeight: '500',
+    color: '#fff',
+    marginRight: getResponsiveSpacing(6, 8),
+    fontFamily: FONTS.medium,
+  },
+  verifiedContainer: {
+    marginTop: 2,
+  },
+  messageButton: {
+    width: getResponsiveWidth(40, 48),
+    height: getResponsiveWidth(40, 48),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messageIcon: {
+    width: 24,
+    height: 24,
+    tintColor: '#fff',
   },
 });
 

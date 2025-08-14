@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Colors from '../../../constants/Colors';
 import { FONTS } from '../../../constants/font';
 import { TEXT_STYLES } from '../../../constants/text';
 import CustomButton from '../../../constants/button';
@@ -51,8 +50,14 @@ const OnboardingTemplate = ({
         {showSkip && (
           <TouchableOpacity
             style={styles.skipButton}
-            onPress={() => {
-              navigation.replace('MainTabs');
+            onPress={async () => {
+              // Wait a bit for authentication state to fully establish
+              console.log('[OnboardingTemplate] Waiting for auth state to establish before skip navigation...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Navigate to main app using navigate instead of replace for better state sync
+              console.log('[OnboardingTemplate] Navigating to MainTabs from skip...');
+              navigation.navigate('MainTabs');
             }}
           >
             <Text style={styles.skipText}>Skip</Text>
@@ -94,9 +99,7 @@ const OnboardingTemplate = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: 32,
-    // Remove manual paddingTop - let SafeAreaView handle it
+    backgroundColor: '#121212', 
   },
   header: {
     flexDirection: 'row',
@@ -142,8 +145,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   bottomSection: {
-    paddingHorizontal: 24,
-    marginBottom:40,
+    paddingHorizontal: 24, 
     zIndex: 2,
   },
   bottomText: {

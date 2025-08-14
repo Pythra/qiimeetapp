@@ -27,8 +27,7 @@ const About = ({ navigation }) => (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: 32,
+    backgroundColor: '#121212', 
   },
   scrollContent: {
     paddingHorizontal: 16,

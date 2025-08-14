@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity } from 'react-native';
 import TopHeader from '../../components/TopHeader';
 import CustomButton from '../../constants/button';
@@ -10,12 +10,18 @@ const LocationFilter = ({ navigation }) => {
   const [selectedCountry, setSelectedCountry] = useState('Nigeria');
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [searchText, setSearchText] = useState('');
-  const allRecommendedLocations = ['Lagos', 'Abuja (FCT)', 'Kaduna', 'Imo', 'Anambra'];
+  const allRecommendedLocations = ['Lagos', 'Abuja (FCT)', 'Kaduna', 'Imo', 'Anambra', 'Kano', 'Rivers', 'Oyo', 'Ogun', 'Enugu', 'Anambra', 'Delta', 'Edo', 'Akwa Ibom', 'Cross River', 'Benue', 'Borno', 'Plateau', 'Ondo', 'Osun', 'Ekiti', 'Imo', 'Abia', 'Bauchi', 'Katsina', 'Kebbi', 'Kogi', 'Niger', 'Taraba', 'Yobe', 'Zamfara', 'Sokoto', 'Jigawa', 'Gombe', 'Nasarawa', 'Bayelsa', 'Ebonyi', 'Adamawa'];
   
   // Filter out selected locations from recommended
   const availableRecommended = allRecommendedLocations.filter(
     location => !selectedLocations.includes(location)
   );
+
+  const suggested = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return availableRecommended;
+    return availableRecommended.filter(l => l.toLowerCase().includes(q));
+  }, [searchText, availableRecommended]);
 
   const addLocation = (location) => {
     if (!selectedLocations.includes(location)) {
@@ -81,7 +87,7 @@ const LocationFilter = ({ navigation }) => {
 
       <Text style={styles.sectionTitle}>Recommended Locations</Text>
       <View style={styles.recommendedContainer}>
-        {availableRecommended.map((location, index) => (
+        {suggested.map((location, index) => (
           <TouchableOpacity 
             key={index} 
             style={styles.recommendedItem}

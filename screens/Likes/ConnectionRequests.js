@@ -10,15 +10,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { MaterialIcons, FontAwesome6 } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../env';
+import { useAuth } from '../../components/AuthContext';
 
 const ConnectionRequests = ({ navigation }) => {
+  const { user: currentUser, allUsers, updateUser, getProfileImageSource } = useAuth();
   const [policyModalVisible, setPolicyModalVisible] = useState(false);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [limitModalVisible, setLimitModalVisible] = useState(false);
   const [requests, setRequests] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequester, setSelectedRequester] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [pastConnections, setPastConnections] = useState([]);
 
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -42,31 +44,33 @@ const ConnectionRequests = ({ navigation }) => {
       if (isRefreshing) {
         setRefreshing(true);
       }
+      
+      if (!currentUser) return;
+      
+      // Fetch requesters
       const token = await AsyncStorage.getItem('token');
       if (!token) throw new Error('No token');
       
-      // Fetch current user profile
-      const profileRes = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const profileData = await profileRes.json();
-      setCurrentUser(profileData);
-      
-      // Fetch requesters
       const res = await fetch(`${API_BASE_URL}/auth/my-requesters`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
       
       if (data.requesters && data.requesters.length > 0) {
-        // Fetch all users with complete data
-        const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`);
-        const allUsersData = await allUsersRes.json();
-        const allUsers = allUsersData.users || [];
+        // Use AuthContext allUsers data if available, otherwise fetch
+        let allUsersData = [];
+        if (allUsers && allUsers.length > 0) {
+          allUsersData = allUsers;
+        } else {
+          // Fetch all users with complete data only if not available in context
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`);
+          const allUsersResponse = await allUsersRes.json();
+          allUsersData = allUsersResponse.users || [];
+        }
         
         // Map requesters to complete user data
         const completeRequesters = data.requesters.map(requester => {
-          const completeUser = allUsers.find(user => user._id === requester._id);
+          const completeUser = allUsersData.find(user => user._id === requester._id);
           return completeUser || requester; // Fallback to original requester data if not found
         });
         
@@ -74,10 +78,33 @@ const ConnectionRequests = ({ navigation }) => {
       } else {
         setRequests([]);
       }
+
+      // Fetch past connections for the "View Past Connections" button
+      if (currentUser.pastConnections && currentUser.pastConnections.length > 0) {
+        let allUsersData = [];
+        if (allUsers && allUsers.length > 0) {
+          allUsersData = allUsers;
+        } else {
+          // Fetch all users with complete data only if not available in context
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`);
+          const allUsersResponse = await allUsersRes.json();
+          allUsersData = allUsersResponse.users || [];
+        }
+        
+        // Map past connection IDs to complete user data
+        const completePastConnections = currentUser.pastConnections.map(connectionId => {
+          const completeUser = allUsersData.find(user => user._id === connectionId);
+          return completeUser || { _id: connectionId }; // Fallback to basic object if not found
+        }).filter(Boolean);
+        
+        setPastConnections(completePastConnections);
+      } else {
+        setPastConnections([]);
+      }
     } catch (err) {
       console.error('Error fetching connection requests:', err);
       setRequests([]);
-      setCurrentUser(null);
+      setPastConnections([]);
     } finally {
       if (isRefreshing) {
         setRefreshing(false);
@@ -92,18 +119,30 @@ const ConnectionRequests = ({ navigation }) => {
 
   // Initial load
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
 
   // Refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       console.log('ConnectionRequests screen focused - refreshing data');
-      fetchData();
-    }, [])
+      if (currentUser) {
+        fetchData();
+      }
+    }, [currentUser])
   );
 
   const handleAccept = (requester) => {
+    // Check if user already has a connection or pending request
+    const hasActiveConnection = currentUser?.connections && currentUser.connections.length > 0;
+    const hasPendingRequest = currentUser?.requests && currentUser.requests.length > 0;
+    
+    if (hasActiveConnection || hasPendingRequest) {
+      setLimitModalVisible(true);
+      return;
+    }
     setSelectedRequester(requester);
     setPolicyModalVisible(true);
   };
@@ -116,21 +155,25 @@ const ConnectionRequests = ({ navigation }) => {
   const handlePolicyAccept = async () => {
     setPolicyModalVisible(false);
     if (!currentUser || !selectedRequester) return;
-    // Deterministic chatId (sorted IDs)
-    const ids = [currentUser._id, selectedRequester._id].sort();
-    const chatId = `${ids[0]}_${ids[1]}`;
-    navigation.navigate('Chat', {
-      screen: 'ChatInterface',
+    
+    // Navigate to chat without specifying chatId - let ChatInterface create it
+    navigation.navigate('MainTabs', {
+      screen: 'Chat',
       params: {
-        chatId,
-        user: selectedRequester, // show the requester's profile in chat header
-        otherUserId: currentUser._id,
+        connectionEstablished: true,
+        newConnectionUserId: selectedRequester._id,
+        screen: 'ChatInterface',
+        params: {
+          otherUserId: selectedRequester._id, // the person you are chatting with
+          otherUser: selectedRequester, // pass the full user object
+        }
       }
     });
+    
     // Call backend to update connections
     try {
       const token = await AsyncStorage.getItem('token');
-      await fetch(`${API_BASE_URL}/auth/accept-connection`, {
+      const response = await fetch(`${API_BASE_URL}/auth/accept-connection`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -138,8 +181,14 @@ const ConnectionRequests = ({ navigation }) => {
         },
         body: JSON.stringify({ targetUserId: selectedRequester._id }),
       });
-      // Remove accepted requester from requests state
-      setRequests(prev => prev.filter(r => r._id !== selectedRequester._id));
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        // Update user data in AuthContext
+        updateUser(responseData);
+        // Remove accepted requester from requests state
+        setRequests(prev => prev.filter(r => r._id !== selectedRequester._id));
+      }
     } catch (err) {
       // Handle error (show toast, etc.)
       console.error('Failed to accept connection', err);
@@ -190,25 +239,24 @@ const ConnectionRequests = ({ navigation }) => {
           </View>
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={styles.infoBox}
-          onPress={() => navigation.navigate('PastConnections')}
-        >
-          <View style={styles.infoBoxContent}>
-            <Text style={styles.infoBoxTitle}>View past connections</Text>
-            <Ionicons name="chevron-forward" size={24} color="#666" />
-          </View>
-        </TouchableOpacity>
+        {/* Only show "View Past Connections" if there are actual past connections */}
+        {pastConnections.length > 0 && (
+          <TouchableOpacity 
+            style={styles.infoBox}
+            onPress={() => navigation.navigate('PastConnections')}
+          >
+            <View style={styles.infoBoxContent}>
+              <Text style={styles.infoBoxTitle}>View past connections</Text>
+              <Ionicons name="chevron-forward" size={24} color="#666" />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Request Cards */}
         {requests.length > 0 ? requests.map((request) => (
           <View key={request._id} style={styles.requestCard}>
             <Image 
-              source={
-                request.profilePictures && request.profilePictures.length > 0
-                  ? { uri: request.profilePictures[0] }
-                  : require('../../assets/model.jpg')
-              } 
+              source={getProfileImageSource(request)}
               style={styles.userImage} 
             />
             <View style={styles.userInfo}>
@@ -241,14 +289,16 @@ const ConnectionRequests = ({ navigation }) => {
         onAccept={handlePolicyAccept}
         targetUserId={selectedRequester?._id}
         onConnectionLimit={() => setLimitModalVisible(true)}
+        modalType="accept"
       />
 
       <ConnectionLimitModal 
         visible={limitModalVisible}
         onClose={() => setLimitModalVisible(false)}
         onUpgrade={handleUpgradeConnections}
-        currentConnections={currentUser?.allowedConnections || 0}
-        maxConnections={3}
+        currentConnections={currentUser?.connections?.length || 0}
+        maxConnections={1}
+        hasPendingRequest={(currentUser?.connections && currentUser.connections.length > 0) || (currentUser?.requests && currentUser.requests.length > 0)}
       />
 
       <Modal

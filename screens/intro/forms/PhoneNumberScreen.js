@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,75 +17,33 @@ import CustomButton from '../../../constants/button';
 import { FONTS } from '../../../constants/font';
 import { TEXT_STYLES } from '../../../constants/text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as AuthSession from 'expo-auth-session';
-import * as Crypto from 'expo-crypto';
-import { Buffer } from 'buffer';
+
 import { API_BASE_URL } from '../../../env';
 
-// Ensure Buffer is available globally (for some environments)
-if (typeof global.Buffer === 'undefined') {
-  global.Buffer = Buffer;
-}
 
-// Helper: base64url encode (no padding, +/ replaced)
-function base64UrlEncode(str) {
-  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-// Helper: generate PKCE values
-const generatePKCE = async () => {
-  // Generate a 32-byte random array
-  const randomBytes = new Uint8Array(32);
-  Crypto.getRandomValues(randomBytes);
-
-  // Convert to base64 string
-  const verifier = base64UrlEncode(Buffer.from(randomBytes).toString('base64'));
-
-  // SHA256 hash and base64url encode
-  const hash = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    verifier,
-    { encoding: Crypto.CryptoEncoding.BASE64 }
-  );
-  const challenge = base64UrlEncode(hash);
-
-  return { verifier, challenge };
-};
-
-const redirectUri = AuthSession.makeRedirectUri({
-  scheme: 'qiimeet',
-  path: 'auth'
-});
-
-// AWS Cognito Configuration
-const discovery = {
-  authorizationEndpoint: 'https://us-east-1satk1s7rf.auth.us-east-1.amazoncognito.com/oauth2/authorize',
-  tokenEndpoint: 'https://us-east-1satk1s7rf.auth.us-east-1.amazoncognito.com/oauth2/token',
-};
-
-const cognitoConfig = {
-  clientId: '15iaae67g5l5ri9allt7f866',
-  redirectUri: AuthSession.makeRedirectUri({
-    useProxy: true,
-    scheme: 'qiimeet'
-  }),
-  responseType: 'code',
-  scopes: ['openid', 'email', 'phone'],
-  additionalParameters: {
-    identity_provider: 'Google',
-  },
-  usePKCE: true,
-};
 
 const { width, height } = Dimensions.get('window');
 const googleIcon = require('../../../assets/google.png');
 const fbIcon = require('../../../assets/fb.png');
 const appleIcon = require('../../../assets/apple.png');
 
-const PhoneNumberScreen = ({ navigation }) => {
+const PhoneNumberScreen = ({ navigation, route }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [formattedNumber, setFormattedNumber] = useState('');
   const [error, setError] = useState('');
+  
+  // Get social login data from route params
+  const socialLoginData = route?.params?.socialLoginData;
+  const provider = route?.params?.provider;
+  const isSignIn = route?.params?.isSignIn;
+
+  // Check if we have social login data
+  useEffect(() => {
+    if (socialLoginData) {
+      console.log('Social login data received:', socialLoginData);
+      // You can pre-fill some fields or show different UI based on social login
+    }
+  }, [socialLoginData]);
 
   const formatPhoneNumber = (number) => {
     // Remove all non-digits
@@ -122,10 +80,20 @@ const PhoneNumberScreen = ({ navigation }) => {
 
   const sendOTP = async (phoneNumber) => {
     try {
+      // Prepare the request body
+      const requestBody = { phoneNumber };
+      
+      // If we have social login data, include it
+      if (socialLoginData) {
+        requestBody.socialLoginData = socialLoginData;
+        requestBody.provider = provider;
+        requestBody.isSignIn = isSignIn;
+      }
+      
       const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber }),
+        body: JSON.stringify(requestBody),
       });
       
       const data = await response.json();
@@ -133,9 +101,25 @@ const PhoneNumberScreen = ({ navigation }) => {
       if (data.success && data.pinId) {
         // Store pinId for verification
         await AsyncStorage.setItem('otpPinId', data.pinId);
+        
+        // Use the processed phone number from the backend response if available
+        const phoneNumberToUse = data.phoneNumber || phoneNumber;
+        
+        // Store social login data for verification screen
+        if (socialLoginData) {
+          await AsyncStorage.setItem('socialLoginData', JSON.stringify(socialLoginData));
+          await AsyncStorage.setItem('socialProvider', provider);
+          await AsyncStorage.setItem('isSocialSignIn', isSignIn ? 'true' : 'false');
+        }
+        
         navigation.navigate('Auth', { 
           screen: 'VerificationCode',
-          params: { phoneNumber: phoneNumber }
+          params: { 
+            phoneNumber: phoneNumberToUse,
+            socialLoginData: socialLoginData,
+            provider: provider,
+            isSignIn: isSignIn
+          }
         });
       } else {
         Alert.alert('Error', data.error || 'Failed to send verification code');
@@ -146,118 +130,9 @@ const PhoneNumberScreen = ({ navigation }) => {
     }
   };
 
-  // Google Authentication Function
-  const loginWithGoogle = async () => {
-    try {
-      const redirectUri = AuthSession.makeRedirectUri({
-        useProxy: true,
-      });
-      
-      // Generate PKCE values
-      const { verifier, challenge } = await generatePKCE();
-      await AsyncStorage.setItem('codeVerifier', verifier);
-      
-      const request = new AuthSession.AuthRequest({
-        clientId: cognitoConfig.clientId,
-        scopes: cognitoConfig.scopes,
-        redirectUri: redirectUri,
-        responseType: AuthSession.ResponseType.Code,
-        extraParams: {
-          ...cognitoConfig.additionalParameters,
-          code_challenge: challenge,
-          code_challenge_method: 'S256',
-        },
-      });
 
-      const result = await request.promptAsync(discovery);
-      
-      if (result.type === 'success' && result.params.code) {
-        const tokenResponse = await exchangeCodeForTokens(result.params.code, verifier);
-        
-        if (tokenResponse.access_token) {
-          // Store tokens securely
-          await AsyncStorage.setItem('accessToken', tokenResponse.access_token);
-          await AsyncStorage.setItem('idToken', tokenResponse.id_token);
-          await AsyncStorage.setItem('refreshToken', tokenResponse.refresh_token);
-          
-          // Get user info from the token
-          const userInfo = await getUserInfo(tokenResponse.access_token);
-          
-          // Navigate to the welcome screen
-          navigation.navigate('Welcome'); // Changed from 'Home' to 'Welcome'
-        }
-      } else {
-        console.warn('Google login cancelled or failed', result);
-        Alert.alert('Login Failed', 'Google authentication was cancelled or failed');
-      }
-    } catch (error) {
-      console.error('Detailed Google login error:', error);
-      Alert.alert('Error', 'Failed to authenticate with Google');
-    }
-  };
 
-  // Exchange authorization code for tokens
-  const exchangeCodeForTokens = async (code, codeVerifier) => {
-    try {
-      if (!code || !codeVerifier) {
-        throw new Error('Missing code or code verifier');
-      }
 
-      const params = new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: cognitoConfig.clientId,
-        code: code,
-        redirect_uri: cognitoConfig.redirectUri,
-        code_verifier: codeVerifier,
-      });
-
-      console.log('Token exchange params:', params.toString());
-
-      const response = await fetch(discovery.tokenEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
-      });
-
-      const tokenData = await response.json();
-      console.log('Token exchange response:', tokenData);
-      
-      if (!response.ok) {
-        throw new Error(tokenData.error_description || 'Token exchange failed');
-      }
-      
-      return tokenData;
-    } catch (error) {
-      console.error('Detailed token exchange error:', error);
-      throw error;
-    }
-  };
-
-  // Get user information using access token
-  const getUserInfo = async (accessToken) => {
-    try {
-      const response = await fetch('https://us-east-1satk1s7rf.auth.us-east-1.amazoncognito.com/oauth2/userInfo', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
-
-      const userInfo = await response.json();
-      
-      if (!response.ok) {
-        throw new Error('Failed to get user info');
-      }
-      
-      console.log('User info:', userInfo);
-      return userInfo;
-    } catch (error) {
-      console.error('Get user info error:', error);
-      throw error;
-    }
-  };
 
   const handleNext = async () => {
     if (phoneNumber.length === 10) {
@@ -273,7 +148,8 @@ const PhoneNumberScreen = ({ navigation }) => {
   const handleSocialLogin = (provider) => {
     switch (provider) {
       case 'google':
-        loginWithGoogle();
+        // Navigate back to signup screen for Google login
+        navigation.navigate('SignUp');
         break;
       case 'apple':
         // TODO: Implement Apple login
@@ -298,7 +174,14 @@ const PhoneNumberScreen = ({ navigation }) => {
         </TouchableOpacity>
 
         <View style={styles.content}>
-          <Text style={TEXT_STYLES.header}>What's your phone number?</Text>
+          <Text style={TEXT_STYLES.header}>
+            {socialLoginData ? 'Complete your profile' : 'What\'s your phone number?'}
+          </Text>
+          {socialLoginData && (
+            <Text style={[TEXT_STYLES.explanation, { marginBottom: 20, textAlign: 'center' }]}>
+              Welcome! Please provide your phone number to complete your {isSignIn ? 'sign in' : 'registration'}.
+            </Text>
+          )}
           <View style={[styles.inputContainer, error && styles.inputContainerError]}>
             <View style={styles.countryCodeContainer}>
               <Image 
@@ -327,7 +210,10 @@ const PhoneNumberScreen = ({ navigation }) => {
             </View>
           )}
           <Text style={TEXT_STYLES.explanation}>
-            We'll text you a code to verify you're really you. Message and data rates may apply.
+            {socialLoginData 
+              ? 'We\'ll text you a code to verify your phone number and complete your profile.'
+              : 'We\'ll text you a code to verify you\'re really you. Message and data rates may apply.'
+            }
           </Text>
           <CustomButton 
             title="Next"

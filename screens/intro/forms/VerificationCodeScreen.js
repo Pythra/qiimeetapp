@@ -18,6 +18,7 @@ import { FONTS } from '../../../constants/font';
 import CustomButton from '../../../constants/button';
 import OnboardingTemplate from './OnboardingTemplate';
 import { API_BASE_URL } from '../../../env';
+import { useAuth } from '../../../components/AuthContext';
 
 const VerificationCodeScreen = ({ route, navigation }) => {
   const [code, setCode] = useState('');
@@ -27,7 +28,15 @@ const VerificationCodeScreen = ({ route, navigation }) => {
   const [canResend, setCanResend] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const { phoneNumber, pinId } = route.params;
+  const { phoneNumber, pinId, isPhoneUpdate } = route.params;
+  const { login } = useAuth();
+
+  // Debug logging
+  useEffect(() => {
+    console.log('VerificationCodeScreen params:', route.params);
+    console.log('Phone number received:', phoneNumber);
+    console.log('Pin ID received:', pinId);
+  }, [route.params, phoneNumber, pinId]);
 
   // Cursor blinking effect
   useEffect(() => {
@@ -59,26 +68,100 @@ const verifyOTP = async () => {
   }
   setIsVerifying(true);
   try {
-    // Call backend to register phone number
-    const response = await fetch(`${API_BASE_URL}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phoneNumber }),
-    });
-    const data = await response.json();
-    if (data.token) {
-      await AsyncStorage.setItem('token', data.token);
-      if (route.params && route.params.fromSignIn) {
-        navigation.navigate('MainTabs');
+    if (isPhoneUpdate) {
+      // Handle phone number update verification
+      const response = await fetch(`${API_BASE_URL}/auth/verify-phone-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          pinId, 
+          pin: code, 
+          phoneNumber 
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', 'Phone number updated successfully!', [
+          { text: 'OK', onPress: () => navigation.navigate('Account') }
+        ]);
       } else {
-        navigation.navigate('Welcome');
+        setError(data.error || 'Verification failed. Please try again.');
       }
     } else {
-      setError(data.error || 'Failed to save phone number.');
+      // Handle regular OTP verification
+      console.log('Sending OTP verification request:', { pinId, pin: code, phoneNumber });
+      
+      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          pinId, 
+          pin: code, 
+          phoneNumber 
+        }),
+      });
+      
+      const data = await response.json();
+      console.log('OTP verification response:', data);
+      
+      if (data.success && data.token && data.user) {
+        // Use AuthContext login function to properly set user data
+        const loginSuccess = await login(data.token, data.user);
+        if (loginSuccess) {
+          // Wait a moment to ensure all data is properly loaded
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          if (route.params && route.params.fromSignIn) {
+            navigation.navigate('MainTabs');
+          } else {
+            navigation.navigate('Welcome');
+          }
+        } else {
+          setError('Login failed. Please try again.');
+        }
+      } else if (data.success && data.token) {
+        // Handle case where user data is missing but token is present
+        console.warn('User data missing from response, attempting to fetch user profile...');
+        
+        try {
+          // Fetch user profile using the token
+          const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+            headers: {
+              'Authorization': `Bearer ${data.token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (userResponse.ok) {
+            const userData = await userResponse.json();
+            const loginSuccess = await login(data.token, userData);
+            if (loginSuccess) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              if (route.params && route.params.fromSignIn) {
+                navigation.navigate('MainTabs');
+              } else {
+                navigation.navigate('Welcome');
+              }
+            } else {
+              setError('Login failed. Please try again.');
+            }
+          } else {
+            setError('Failed to fetch user profile. Please try again.');
+          }
+        } catch (profileError) {
+          console.error('Error fetching user profile:', profileError);
+          setError('Failed to fetch user profile. Please try again.');
+        }
+      } else {
+        setError(data.error || 'Verification failed. Please try again.');
+      }
     }
-  } catch (err) {
-    console.error('Register error:', err);
-    setError('Failed to save phone number.');
+  } catch (error) {
+    console.error('Verification error:', error);
+    setError('Verification failed. Please try again.');
   }
   setIsVerifying(false);
 };
@@ -88,10 +171,29 @@ const handleResendCode = async () => {
   if (!canResend || isResending) return;
   setIsResending(true);
   setError('');
-  // Bypass backend call for testing
-  setCountdown(40);
-  setCanResend(false);
-  Alert.alert('Success', 'New verification code sent!');
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.success && data.pinId) {
+      await AsyncStorage.setItem('pinId', data.pinId);
+      setCountdown(40);
+      setCanResend(false);
+      Alert.alert('Success', 'New verification code sent!');
+    } else {
+      Alert.alert('Error', data.error || 'Failed to resend code');
+    }
+  } catch (error) {
+    console.error('Resend error:', error);
+    Alert.alert('Error', 'Failed to resend code');
+  }
+  
   setIsResending(false);
 };
 

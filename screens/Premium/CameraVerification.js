@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Dimensions, Image, Mod
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import greenWhiteCheck from '../../assets/greenwhitecheck.png';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -16,34 +18,45 @@ const CameraVerification = ({ navigation }) => {
   const [cameraError, setCameraError] = useState(null);
   const [useCameraPermissions, setUseCameraPermissions] = useState(null);
   const [isModernCamera, setIsModernCamera] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
+  const [showCamera, setShowCamera] = useState(true); // Start camera immediately
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraTimeout, setCameraTimeout] = useState(false);
+  const [showFallbackButton, setShowFallbackButton] = useState(false);
   const cameraRef = useRef(null);
+  const cameraTimeoutRef = useRef(null);
 
   useEffect(() => {
     const loadCamera = async () => {
       try {
+        console.log('Loading camera module...');
         const cameraModule = await import('expo-camera');
+        console.log('Camera module loaded:', Object.keys(cameraModule));
+        
         let CameraComp = null;
         let permissionsHook = null;
         let modern = false;
 
-        // Check for modern CameraView first
+        // Check for modern CameraView first (expo-camera v15+)
         if (cameraModule.CameraView) {
+          console.log('Using modern CameraView');
           CameraComp = cameraModule.CameraView;
           permissionsHook = cameraModule.useCameraPermissions;
           modern = true;
         } else if (cameraModule.Camera) {
+          console.log('Using legacy Camera component');
           CameraComp = cameraModule.Camera;
           modern = false;
         } else if (cameraModule.default) {
+          console.log('Using default Camera component');
           CameraComp = cameraModule.default;
           modern = false;
         }
 
         if (!CameraComp) {
-          setCameraError('No valid camera component found');
+          console.error('No camera component found in module');
+          setCameraError('No valid camera component found. Please ensure expo-camera is properly installed.');
           setPermission(false);
           return;
         }
@@ -51,28 +64,57 @@ const CameraVerification = ({ navigation }) => {
         setCameraComponent(() => CameraComp);
         setUseCameraPermissions(() => permissionsHook);
         setIsModernCamera(modern);
+        
+        console.log('Camera component set:', { modern, hasPermissionsHook: !!permissionsHook });
 
         // Handle permissions
         if (permissionsHook) {
+          console.log('Using modern permissions hook');
           setPermission('hook');
         } else {
+          console.log('Using legacy permissions method');
           let status;
           if (cameraModule.Camera?.requestCameraPermissionsAsync) {
+            console.log('Requesting camera permissions via Camera.requestCameraPermissionsAsync');
             const result = await cameraModule.Camera.requestCameraPermissionsAsync();
             status = result.status;
           } else if (cameraModule.requestCameraPermissionsAsync) {
+            console.log('Requesting camera permissions via module.requestCameraPermissionsAsync');
             const result = await cameraModule.requestCameraPermissionsAsync();
             status = result.status;
+          } else {
+            console.warn('No permission request method found, assuming granted');
+            status = 'granted';
           }
+          console.log('Permission status:', status);
           setPermission(status === 'granted');
         }
       } catch (error) {
-        setCameraError(`Failed to load camera: ${error.message}`);
+        console.error('Failed to load camera:', error);
+        setCameraError(`Failed to load camera: ${error.message}. Please ensure expo-camera is installed.`);
         setPermission(false);
       }
     };
     loadCamera();
   }, []);
+
+  // Add camera ready timeout
+  useEffect(() => {
+    if (showCamera && CameraComponent && !cameraReady) {
+      cameraTimeoutRef.current = setTimeout(() => {
+        console.warn('Camera ready timeout - forcing ready state');
+        setCameraReady(true);
+        setCameraTimeout(true);
+      }, 10000); // 10 second timeout
+    }
+    
+    return () => {
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
+    };
+  }, [showCamera, CameraComponent, cameraReady]);
 
   const ModernCameraComponent = () => {
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -106,14 +148,18 @@ const CameraVerification = ({ navigation }) => {
 
   const getCameraProps = () => {
     if (isModernCamera) {
-      // For modern CameraView
+      // For modern CameraView (expo-camera v15+)
+      console.log('Setting up modern camera props');
       return {
-        facing: 'front' // Use 'facing' prop for CameraView
+        facing: 'front',
+        // Remove mode prop as it might not be needed for CameraView
       };
     } else {
       // For legacy Camera component
+      console.log('Setting up legacy camera props');
+      const { Camera } = require('expo-camera');
       return {
-        type: 'front' // Try direct string first
+        type: Camera?.Constants?.Type?.front || 'front'
       };
     }
   };
@@ -121,13 +167,140 @@ const CameraVerification = ({ navigation }) => {
   const getStepInstruction = () => 'Look straight at the camera';
 
   const handleCapture = async () => {
-    if (!cameraReady || !cameraRef.current) return;
-    const photo = await cameraRef.current.takePictureAsync({
-      quality: 0.8,
-      base64: false,
-    });
-    setCapturedPhoto(photo);
-    setShowSuccessModal(true);
+    if (!cameraRef.current || isCapturing) return;
+    
+    // Allow capture even if camera not "ready" after timeout
+    if (!cameraReady && !cameraTimeout) return;
+    
+    try {
+      setIsCapturing(true);
+      console.log('Starting photo capture...', { cameraReady, cameraTimeout, isModernCamera });
+      
+      let photo;
+      
+      if (isModernCamera) {
+        // Modern CameraView (expo-camera v15+)
+        console.log('Using modern camera capture');
+        console.log('Available methods:', Object.getOwnPropertyNames(cameraRef.current));
+        
+        if (cameraRef.current.takePictureAsync) {
+          console.log('Using takePictureAsync method');
+          // Modern CameraView expects simpler options
+          photo = await cameraRef.current.takePictureAsync();
+        } else {
+          throw new Error('takePictureAsync method not available on modern CameraView');
+        }
+      } else {
+        // Legacy Camera component
+        console.log('Using legacy camera capture');
+        if (!cameraRef.current.takePictureAsync) {
+          throw new Error('takePictureAsync method not available on legacy camera reference');
+        }
+        
+        photo = await cameraRef.current.takePictureAsync({
+          quality: 0.8,
+          base64: false,
+          exif: false,
+          skipProcessing: false,
+        });
+      }
+      
+      console.log('Photo captured:', photo);
+      
+      if (photo && photo.uri) {
+        setCapturedPhoto(photo);
+        await AsyncStorage.setItem('capturedSelfie', photo.uri);
+        console.log('Photo saved to AsyncStorage:', photo.uri);
+        setShowSuccessModal(true);
+      } else {
+        console.error('Invalid photo object:', photo);
+        Alert.alert('Error', 'Failed to capture photo. Please try again.');
+      }
+    } catch (error) {
+      console.error('Photo capture error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        cameraRef: !!cameraRef.current,
+        takePictureAsync: !!cameraRef.current?.takePictureAsync
+      });
+      
+      // Try fallback with ImagePicker
+      console.log('Attempting fallback with ImagePicker...');
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+          cameraType: ImagePicker.CameraType.front,
+        });
+        
+        if (!result.canceled && result.assets && result.assets.length > 0) {
+          const photo = { uri: result.assets[0].uri };
+          console.log('Fallback photo captured:', photo);
+          
+          setCapturedPhoto(photo);
+          await AsyncStorage.setItem('capturedSelfie', photo.uri);
+          console.log('Fallback photo saved to AsyncStorage:', photo.uri);
+          setShowSuccessModal(true);
+          return; // Success with fallback
+        }
+      } catch (fallbackError) {
+        console.error('Fallback ImagePicker also failed:', fallbackError);
+      }
+      
+      // Show fallback button if both automated methods failed
+      setShowFallbackButton(true);
+      
+      // Show error if both methods failed
+      let errorMessage = 'Failed to capture photo. Please try again.';
+      if (error.message.includes('permissions') || error.message.includes('Permission')) {
+        errorMessage = 'Camera permission denied. Please enable camera access in settings.';
+      } else if (error.message.includes('not ready') || error.message.includes('not available')) {
+        errorMessage = 'Camera is not ready. Please wait a moment and try again.';
+      } else if (error.message.includes('takePictureAsync')) {
+        errorMessage = 'Camera method not available. Please restart the app and try again.';
+      } else if (error.message.includes('Camera is not running')) {
+        errorMessage = 'Camera is not active. Please restart the screen and try again.';
+      }
+      
+      Alert.alert('Camera Error', `${errorMessage}\n\nA manual camera option will appear below.`);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleManualCapture = async () => {
+    try {
+      setIsCapturing(true);
+      console.log('Manual camera capture initiated...');
+      
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        cameraType: ImagePicker.CameraType.front,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const photo = { uri: result.assets[0].uri };
+        console.log('Manual photo captured:', photo);
+        
+        setCapturedPhoto(photo);
+        await AsyncStorage.setItem('capturedSelfie', photo.uri);
+        console.log('Manual photo saved to AsyncStorage:', photo.uri);
+        setShowSuccessModal(true);
+        setShowFallbackButton(false); // Hide fallback button on success
+      }
+    } catch (error) {
+      console.error('Manual capture failed:', error);
+      Alert.alert('Manual Capture Failed', 'Unable to open camera. Please check your permissions and try again.');
+    } finally {
+      setIsCapturing(false);
+    }
   };
 
   const SuccessModal = () => (
@@ -173,14 +346,23 @@ const CameraVerification = ({ navigation }) => {
                 ref={cameraRef}
                 style={styles.camera}
                 {...getCameraProps()}
-                onCameraReady={() => setCameraReady(true)}
+                onCameraReady={() => {
+                  console.log('Camera is ready');
+                  setCameraReady(true);
+                  if (cameraTimeoutRef.current) {
+                    clearTimeout(cameraTimeoutRef.current);
+                    cameraTimeoutRef.current = null;
+                  }
+                }}
+                onMountError={(error) => {
+                  console.error('Camera mount error:', error);
+                  setCameraError(`Camera mount failed: ${error?.message || 'Unknown error'}`);
+                }}
               />
             ) : (
-              <Image 
-                source={require('../../assets/smiler.jpg')} 
-                style={styles.camera}
-                resizeMode="cover"
-              />
+              <View style={[styles.camera, styles.cameraPlaceholder]}>
+                <Text style={styles.cameraPlaceholderText}>Camera Loading...</Text>
+              </View>
             )}
           </View>
           <Text style={styles.instructionText}>
@@ -196,19 +378,29 @@ const CameraVerification = ({ navigation }) => {
           </View>
         </View>
         <TouchableOpacity
-          style={styles.startButton}
-          onPress={() => {
-            if (!showCamera) {
-              setShowCamera(true);
-              return;
-            }
-            handleCapture();
-          }}
+          style={[styles.startButton, (isCapturing || (!cameraReady && !cameraTimeout)) && styles.startButtonDisabled]}
+          onPress={handleCapture}
+          disabled={(!cameraReady && !cameraTimeout) || isCapturing}
         >
           <Text style={styles.startButtonText}>
-            {!showCamera ? 'Start' : 'Capture'}
+            {isCapturing ? 'Capturing...' : 
+             !cameraReady ? (cameraTimeout ? 'Camera Ready (Timeout)' : 'Camera Loading...') : 
+             'Capture Photo'}
           </Text>
         </TouchableOpacity>
+        
+        {showFallbackButton && (
+          <TouchableOpacity
+            style={[styles.fallbackButton]}
+            onPress={handleManualCapture}
+            disabled={isCapturing}
+          >
+            <Text style={styles.fallbackButtonText}>
+              {isCapturing ? 'Opening Camera...' : 'Use Manual Camera'}
+            </Text>
+          </TouchableOpacity>
+        )}
+        
         <SuccessModal />
       </View>
     </View>
@@ -404,6 +596,37 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  startButtonDisabled: {
+    backgroundColor: '#666',
+    opacity: 0.6,
+  },
+  fallbackButton: {
+    backgroundColor: '#444',
+    paddingVertical: 12,
+    paddingHorizontal: 40,
+    borderRadius: 90,
+    marginTop: 16,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#666',
+  },
+  fallbackButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontFamily: FONTS.medium,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  cameraPlaceholder: {
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraPlaceholderText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: FONTS.medium,
   },
 });
 

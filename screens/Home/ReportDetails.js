@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, TouchableWithoutFeedback, Modal } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, TouchableWithoutFeedback, Modal, Alert } from 'react-native';
 import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
 import CustomButton from '../../constants/button';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { API_BASE_URL } from '../../env';
 
 const ReportDetails = ({ navigation, route }) => {
   const [details, setDetails] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [email, setEmail] = useState('email@gmail.com');
   const [newEmail, setNewEmail] = useState('');
-  const { reason } = route.params;
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { reason, reportedUserId, reportType = 'technical_issue' } = route.params || {};
 
   const dismissKeyboard = () => {
     Keyboard.dismiss();
@@ -21,6 +25,65 @@ const ReportDetails = ({ navigation, route }) => {
       setNewEmail('');
     }
     setModalVisible(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!details.trim()) {
+      Alert.alert('Missing Details', 'Please provide details about your report.');
+      return;
+    }
+
+    if (isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+      
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        Alert.alert('Authentication Error', 'Please log in again to submit a report.');
+        return;
+      }
+
+      const reportData = {
+        reportedUserId: reportedUserId || null,
+        reportType: reportType,
+        reason: reason || 'Support Request',
+        details: details.trim(),
+        contactEmail: email !== 'email@gmail.com' ? email : null,
+        category: reportedUserId ? 'user_report' : 'general'
+      };
+
+      const response = await fetch(`${API_BASE_URL}/reports/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(reportData)
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        Alert.alert(
+          'Report Submitted',
+          'Thank you for your report. We\'ll review it and get back to you if needed.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack()
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Submission Failed', result.error || 'Failed to submit report. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      Alert.alert('Network Error', 'Please check your connection and try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -99,8 +162,9 @@ Email
 
         <View style={styles.buttonContainer}>
           <CustomButton 
-            title="Submit" 
-            onPress={() => {/* Handle submit logic */}} 
+            title={isSubmitting ? "Submitting..." : "Submit"} 
+            onPress={handleSubmit}
+            disabled={isSubmitting}
           />
         </View>
       </View>

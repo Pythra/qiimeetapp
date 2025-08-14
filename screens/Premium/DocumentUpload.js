@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -9,9 +10,15 @@ import SimpleLineIcons from 'react-native-vector-icons/SimpleLineIcons';
 import PhaseContainer from './components/PhaseContainer';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { API_BASE_URL } from '../../env';
+import { useAuth } from '../../components/AuthContext';
 
 const DocumentUpload = () => {
   const navigation = useNavigation();
+  const route = useRoute();
+  const { updateUser } = useAuth();
   const [selectedFrontImage, setSelectedFrontImage] = useState(null);
   const [selectedBackImage, setSelectedBackImage] = useState(null);
   const [documentType, setDocumentType] = useState('National Identity Card');
@@ -60,9 +67,160 @@ const DocumentUpload = () => {
     }
   };
 
-  const handleSubmit = () => {
-    if (selectedFrontImage && selectedBackImage) {
+  const handleSubmit = async () => {
+    if (!selectedFrontImage || !selectedBackImage) {
+      Alert.alert('Missing Documents', 'Please upload both front and back of your ID document.');
+      return;
+    }
+
+    try {
+      console.log('[DocumentUpload] Starting verification submission...');
+      
+      // Get the captured selfie from AsyncStorage
+      const capturedSelfie = await AsyncStorage.getItem('capturedSelfie');
+      if (!capturedSelfie) {
+        Alert.alert('Missing Selfie', 'Please go back and capture your selfie first.');
+        return;
+      }
+
+      // Prepare uploads: convert any local (file:// or data:) images to CloudFront URLs via backend upload
+      const filesToUpload = [];
+      const sourceList = [];
+
+      // Helper to push a file to upload queue
+      const queueFile = (uri, defaultName) => {
+        const name = (uri.split('/').pop() || defaultName);
+        filesToUpload.push({ uri, name, type: 'image/jpeg' });
+        sourceList.push(uri);
+      };
+
+      // Front ID
+      if (selectedFrontImage?.uri) {
+        if (selectedFrontImage.uri.startsWith('http')) {
+          sourceList.push(selectedFrontImage.uri);
+        } else {
+          queueFile(selectedFrontImage.uri, 'id_front.jpg');
+        }
+      }
+      // Back ID
+      if (selectedBackImage?.uri) {
+        if (selectedBackImage.uri.startsWith('http')) {
+          sourceList.push(selectedBackImage.uri);
+        } else {
+          queueFile(selectedBackImage.uri, 'id_back.jpg');
+        }
+      }
+      // Selfie
+      let selfieUriForUpload = capturedSelfie;
+      if (capturedSelfie && !capturedSelfie.startsWith('http')) {
+        if (capturedSelfie.startsWith('data:image')) {
+          // Convert base64 to a temp file for upload
+          const ext = capturedSelfie.includes('png') ? 'png' : 'jpg';
+          const tempSelfiePath = `${FileSystem.cacheDirectory}selfie.${ext}`;
+          const base64Data = capturedSelfie.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+          await FileSystem.writeAsStringAsync(tempSelfiePath, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+          selfieUriForUpload = tempSelfiePath;
+        }
+        queueFile(selfieUriForUpload, 'selfie.jpg');
+      } else if (capturedSelfie) {
+        sourceList.push(capturedSelfie);
+      }
+
+      // Upload queued files (if any)
+      let uploadedUrls = [];
+      if (filesToUpload.length > 0) {
+        const formData = new FormData();
+        filesToUpload.forEach(file => {
+          formData.append('images', { uri: file.uri, name: file.name, type: file.type });
+        });
+        const uploadResp = await fetch(`${API_BASE_URL}/upload-images-optimized`, {
+          method: 'POST',
+          body: formData,
+          headers: { 'Accept': 'application/json' },
+        });
+        const uploadJson = await uploadResp.json();
+        if (!uploadResp.ok || !uploadJson.success) {
+          throw new Error(uploadJson.error || 'Image upload failed');
+        }
+        uploadedUrls = uploadJson.imageUrls || [];
+      }
+
+      // Build identityPictures using uploaded URLs for local sources, preserving order: front, back, selfie
+      const identityPictures = [];
+      const takeNextUploaded = () => uploadedUrls.shift();
+
+      // Front
+      identityPictures.push(selectedFrontImage.uri.startsWith('http') ? selectedFrontImage.uri : takeNextUploaded());
+      // Back
+      identityPictures.push(selectedBackImage.uri.startsWith('http') ? selectedBackImage.uri : takeNextUploaded());
+      // Selfie
+      if (capturedSelfie) {
+        identityPictures.push(capturedSelfie.startsWith('http') ? capturedSelfie : takeNextUploaded());
+      }
+
+      // Validate all are URLs now
+      if (identityPictures.some(u => !u || !String(u).startsWith('http'))) {
+        console.warn('[DocumentUpload] One or more identity images are not URLs after upload:', identityPictures);
+      }
+
+      // Get verification form data from route params (if passed from previous screens)
+      const routeParams = route?.params || {};
+      const {
+        firstName = '',
+        middleName = '',
+        lastName = ''
+      } = routeParams;
+
+      // Prepare the verification data
+      const verificationData = {
+        firstname: firstName,
+        middlename: middleName,
+        lastname: lastName,
+        profilePictures: [], // Keep empty to preserve existing profile pictures
+        identityPictures
+      };
+
+      console.log('[DocumentUpload] Verification data:', verificationData);
+
+      // Get token for auth
+      const token = await AsyncStorage.getItem('token');
+      if (!token) throw new Error('No auth token found. Please log in again.');
+
+      // POST to backend
+      const response = await axios.post(
+        `${API_BASE_URL}/auth/verify`,
+        verificationData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('[DocumentUpload] Verification submitted successfully:', response.data);
+      
+      // Update user verification status in AuthContext
+      if (response.data.success && response.data.user) {
+        console.log('[DocumentUpload] Updating user verification status to pending');
+        updateUser({
+          verificationStatus: 'pending',
+          firstname: response.data.user.firstname,
+          middlename: response.data.user.middlename,
+          lastname: response.data.user.lastname,
+          profilePictures: response.data.user.profilePictures,
+          identityPictures: response.data.user.identityPictures
+        });
+      }
+      
+      // Clear the stored selfie
+      await AsyncStorage.removeItem('capturedSelfie');
+      
       navigation.navigate('VerificationInProgress');
+    } catch (err) {
+      console.error('[DocumentUpload] Verification submission failed:', err);
+      const errorMessage = err.response?.data?.error || err.message || 'Could not submit verification.';
+      Alert.alert('Verification Failed', errorMessage);
     }
   };
 

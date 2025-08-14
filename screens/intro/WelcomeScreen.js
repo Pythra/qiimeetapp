@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, Image, TouchableOpacity, Dimensions, Animated, 
 import ScreenWrapper from '../../components/WelcomeWrapper';
 import { useNavigation } from '@react-navigation/native';
 import { useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 const { width, height } = Dimensions.get('window');
 
 import CustomButton from '../../constants/button';
@@ -10,9 +11,11 @@ import { FONTS } from '../../constants/font';
 import TopMaleOrbit from '../../animations/TopMaleOrbit';
 import HeartBeatAnimation from '../../animations/HeartBeatAnimation';
 import WelcomeWrapper from '../../components/WelcomeWrapper';
+import { useAuth } from '../../components/AuthContext';
 
 const WelcomeScreen = ( ) => {
   const navigation = useNavigation();
+  const { refreshAllData, user, initialized } = useAuth();
   const innerSpinValue = useRef(new Animated.Value(0)).current;
   const innerSpinValue2 = useRef(new Animated.Value(0.33)).current; // Start at 120° (1/3 of circle)
   const innerSpinValue3 = useRef(new Animated.Value(0.67)).current; // Start at 240° (2/3 of circle)
@@ -73,6 +76,25 @@ const WelcomeScreen = ( ) => {
 
     startAnimations();
   }, []);
+
+  // Check for authentication tokens and load data if needed
+  useEffect(() => {
+    const checkAuthAndLoadData = async () => {
+      try {
+        const accessToken = await AsyncStorage.getItem('accessToken');
+        const idToken = await AsyncStorage.getItem('idToken');
+        
+        // If we have social login tokens but no user data in AuthContext, load the data
+        if ((accessToken || idToken) && initialized && !user) {
+          await refreshAllData();
+        }
+      } catch (error) {
+        console.warn('Error checking auth tokens:', error);
+      }
+    };
+
+    checkAuthAndLoadData();
+  }, [initialized, user, refreshAllData]);
 
   // Update interpolations to use new orbit paths
   const innerAnimatedTranslateX = innerSpinValue.interpolate({

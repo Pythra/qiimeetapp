@@ -6,430 +6,599 @@ import {
   TouchableOpacity, 
   Image, 
   Dimensions,
+  ActivityIndicator
 } from 'react-native';
 
 import { Ionicons, FontAwesome6, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  useAnimatedGestureHandler,
-  withSpring,
-  withTiming,
-  runOnJS,
-  interpolate,
-  Extrapolate,
-} from 'react-native-reanimated';
-import { PanGestureHandler } from 'react-native-gesture-handler';
+import Swiper from 'react-native-deck-swiper';
 import { FONTS } from '../../constants/font';
 import { API_BASE_URL } from '../../env';
 import ScreenWrapper from '../../components/ScreenWrapper';
+import { useAuth } from '../../components/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const Home = ({ navigation }) => {
+const Home = ({ navigation, route }) => {
+  const { user: profile, token, balance, users: contextUsers, updateUser, initialized, dataReady, refreshBalance, getProfileImageSource } = useAuth();
+
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [showNextCard, setShowNextCard] = useState(true);
+  const swiperRef = useRef(null);
+  const [swipedCards, setSwipedCards] = useState([]);
+  const [cardHistory, setCardHistory] = useState([]);
+  
+
+  const [users, setUsers] = useState(contextUsers || []);
+  const [swiperCards, setSwiperCards] = useState([]);
+  const swiperCardsRef = useRef(swiperCards);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isAnimating, setIsAnimating] = useState(false);
-  
-  // Reanimated shared values
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const scale = useSharedValue(1);
-  const opacity = useSharedValue(1);
-  
-  // Next card animation values
-  const nextCardScale = useSharedValue(0.95);
-  const nextCardOpacity = useSharedValue(0.8);
-  
+  const [filtersActive, setFiltersActive] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({});
+  const [isProcessingSwipe, setIsProcessingSwipe] = useState(false);
+  const [isRewinding, setIsRewinding] = useState(false);
+  const [rewindCounter, setRewindCounter] = useState(0);
+  const usersRef = useRef(users);
+  const filterCooldownUntilRef = useRef(0);
+  const [swipeX, setSwipeX] = useState(0);
+
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
+
+  useEffect(() => {
+    swiperCardsRef.current = swiperCards;
+  }, [swiperCards]);
+
+  // Reset swipeX when component unmounts or navigation changes
+  useEffect(() => {
+    return () => {
+      setSwipeX(0);
+    };
+  }, []);
+
+  // Initialize and synchronize swiperCards from users when safe
+  useEffect(() => {
+    if (!isProcessingSwipe && Date.now() >= filterCooldownUntilRef.current) {
+      const next = users.filter(user => user && (user._id || user.id));
+      const sameLength = next.length === swiperCardsRef.current.length;
+      const sameIds = sameLength && next.every((u, i) => (u?._id || u?.id) === (swiperCardsRef.current[i]?._id || swiperCardsRef.current[i]?.id));
+      if (!sameIds) {
+        setSwiperCards(next);
+      }
+    }
+  }, [users, isProcessingSwipe]);
+
+  // Check for filtered users from route params and load saved filters when component mounts
+  useEffect(() => {
+    const loadSavedFilters = async () => {
+      try {
+        const savedFilters = await AsyncStorage.getItem('activeFilters');
+        if (savedFilters) {
+          const filters = JSON.parse(savedFilters);
+          console.log('📋 Loading saved filters from AsyncStorage:', filters);
+          
+          // Check if any filters are actually set
+          const hasActiveFilters = Object.values(filters).some(value => 
+            value !== null && value !== false && 
+            (Array.isArray(value) ? value.length > 0 : true)
+          );
+          
+          if (hasActiveFilters) {
+            setFiltersActive(true);
+            setActiveFilters(filters);
+            console.log('✅ Restored active filters');
+          }
+        }
+      } catch (error) {
+        console.error('Error loading saved filters:', error);
+      }
+    };
+
+    if (route?.params?.filteredUsers && route.params.filtersApplied) {
+      console.log('🎯 Received filtered users from route params:', route.params.filteredUsers.length);
+      setFiltersActive(true);
+      setActiveFilters(route.params.filters || {});
+      filterAndSetUsers(route.params.filteredUsers, false, true); // Preserve history for filtered users
+      // Clear route params to prevent re-application on re-render
+      navigation.setParams({ filteredUsers: undefined, filtersApplied: undefined });
+    } else {
+      // Load saved filters if no route params
+      loadSavedFilters();
+    }
+  }, [route?.params]);
+
   // Constants
-  const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
-  const ROTATION_FACTOR = 0.3;
   const CARD_WIDTH = SCREEN_WIDTH * 0.9;
   const CARD_HEIGHT = SCREEN_HEIGHT * 0.65;
 
-  const [profile, setProfile] = useState(null);
-  const [token, setToken] = useState(null);
-  const [balance, setBalance] = useState(0); // Add balance state
+  // Function to handle "start over" - fetch fresh users including disliked ones and new users
+  const handleStartOver = useCallback(async () => {
+    try {
+      setLoading(true);
 
-  // Reset card position
-  const resetCard = useCallback(() => {
-    translateX.value = withSpring(0);
-    translateY.value = withSpring(0);
-    scale.value = withSpring(1);
-    opacity.value = withSpring(1);
-  }, []);
-
-  // Animate card out
-  const animateCardOut = useCallback((direction) => {
-    const targetX = direction > 0 ? SCREEN_WIDTH * 1.5 : -SCREEN_WIDTH * 1.5;
-    
-    translateX.value = withTiming(targetX, { duration: 300 });
-    translateY.value = withTiming(translateY.value + Math.random() * 100 - 50, { duration: 300 });
-    scale.value = withTiming(0.8, { duration: 300 });
-    opacity.value = withTiming(0, { duration: 300 }, () => {
-      // Reset values immediately after animation
-      translateX.value = 0;
-      translateY.value = 0;
-      scale.value = 1;
-      opacity.value = 1;
-      
-      // Animate next card to current position
-      nextCardScale.value = withSpring(1);
-      nextCardOpacity.value = withSpring(1);
-      
-      // Update index on JS thread
-      runOnJS(setCurrentIndex)(currentIndex + 1);
-      runOnJS(setIsAnimating)(false);
-    });
-  }, [currentIndex]);
-
-  // Handle swipe action
-  const handleSwipe = useCallback(async (direction) => {
-    if (isAnimating || currentIndex >= users.length) return;
-    setIsAnimating(true);
-    animateCardOut(direction); // Move animation up for instant feedback
-    const swipedUser = users[currentIndex];
-    const swipedUserId = swipedUser._id || swipedUser.id;
-    console.log('--- SWIPE DEBUG ---');
-    console.log('Direction:', direction > 0 ? 'LIKE' : 'DISLIKE');
-    console.log('Swiped user:', swipedUser);
-    console.log('Current user profile:', profile);
-    if (profile && token && swipedUser && swipedUserId) {
+      // First, reset likes and dislikes via API
       try {
-        let updatedLikes = Array.isArray(profile.likes) ? [...profile.likes] : [];
-        let updatedDislikes = Array.isArray(profile.dislikes) ? [...profile.dislikes] : [];
-        if (direction > 0) {
-          if (!updatedLikes.includes(swipedUserId)) updatedLikes.push(swipedUserId);
-          updatedDislikes = updatedDislikes.filter(id => id !== swipedUserId);
-        } else {
-          if (!updatedDislikes.includes(swipedUserId)) updatedDislikes.push(swipedUserId);
-          updatedLikes = updatedLikes.filter(id => id !== swipedUserId);
-        }
-        console.log('Updated likes:', updatedLikes);
-        console.log('Updated dislikes:', updatedDislikes);
-        console.log('Sending PUT /auth/update...');
-        const response = await axios.put(`${API_BASE_URL}/auth/update`, {
-          likes: updatedLikes,
-          dislikes: updatedDislikes
-        }, {
+        const resetResponse = await fetch(`${API_BASE_URL}/auth/reset-likes-dislikes`, {
+          method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         });
-        console.log('PUT /auth/update response:', response.data);
-        setProfile(response.data); // Update local profile state
-      } catch (err) {
-        console.error('Failed to update like/dislike:', err?.response?.data || err.message);
-      }
-    } else {
-      console.warn('Missing profile, token, or swipedUser._id');
-    }
-  }, [isAnimating, currentIndex, users, animateCardOut, profile, token]);
-
-  // Gesture handler
-  const gestureHandler = useAnimatedGestureHandler({
-    onStart: (_, context) => {
-      context.startX = translateX.value;
-      context.startY = translateY.value;
-    },
-    onActive: (event, context) => {
-      if (isAnimating) return;
-      
-      translateX.value = context.startX + event.translationX;
-      translateY.value = context.startY + event.translationY;
-      
-      // Scale down slightly when dragging
-      const dragScale = interpolate(
-        Math.abs(event.translationX),
-        [0, SCREEN_WIDTH * 0.5],
-        [1, 0.95],
-        Extrapolate.CLAMP
-      );
-      scale.value = dragScale;
-      
-      // Animate next card
-      const nextScale = interpolate(
-        Math.abs(event.translationX),
-        [0, SCREEN_WIDTH * 0.5],
-        [0.95, 1],
-        Extrapolate.CLAMP
-      );
-      nextCardScale.value = nextScale;
-      
-      const nextOpacity = interpolate(
-        Math.abs(event.translationX),
-        [0, SCREEN_WIDTH * 0.5],
-        [0.8, 1],
-        Extrapolate.CLAMP
-      );
-      nextCardOpacity.value = nextOpacity;
-    },
-    onEnd: (event) => {
-      if (isAnimating) return;
-      
-      const shouldSwipe = Math.abs(event.translationX) > SWIPE_THRESHOLD || 
-                         Math.abs(event.velocityX) > 1000;
-      
-      if (shouldSwipe) {
-        const direction = event.translationX > 0 ? 1 : -1;
-        runOnJS(handleSwipe)(direction);
-      } else {
-        // Spring back to center
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-        scale.value = withSpring(1);
         
-        // Reset next card
-        nextCardScale.value = withSpring(0.95);
-        nextCardOpacity.value = withSpring(0.8);
+        const resetData = await resetResponse.json();
+        if (resetData.success) {
+          // Update the user context with the reset data
+          updateUser(resetData.user);
+        } else {
+          // Failed to reset likes and dislikes
+        }
+      } catch (resetError) {
+        // Error resetting likes and dislikes
       }
-    },
-  });
+
+      // Clear any active filters
+      setFiltersActive(false);
+      setActiveFilters({});
+      
+      // Clear saved filters from AsyncStorage
+      AsyncStorage.removeItem('activeFilters').catch(error => 
+        console.error('Error clearing saved filters:', error)
+      );
+
+      // Always try to fetch fresh data from server to get any new users
+      try {
+        const response = await fetch(`${API_BASE_URL}/admin/users/home`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const data = await response.json();
+        
+        if (data.success && data.users) {
+          filterAndSetUsers(data.users, true, false); // Include disliked users, clear history
+          setCurrentIndex(0);
+          setCardHistory([]); // Clear history when starting over
+          console.log('🔄 Start over: Reset current index and card history');
+          return;
+        }
+      } catch (fetchError) {
+        // Failed to fetch fresh users, falling back to context users
+      }
+
+      // Fallback: use context users if server fetch fails
+      if (contextUsers && contextUsers.length > 0) {
+        filterAndSetUsers(contextUsers, true, false); // Include disliked users, clear history
+        setCurrentIndex(0);
+        setCardHistory([]); // Clear history when starting over
+        console.log('🔄 Start over (fallback): Reset current index and card history');
+      } else {
+        // No users available for start over
+      }
+    } catch (error) {
+      // Error in handleStartOver
+    } finally {
+      setLoading(false);
+    }
+  }, [contextUsers, filterAndSetUsers, token, updateUser, navigation]);
+
+  // Handle rewind functionality
+  const handleRewind = useCallback(() => {
+    console.log(`🔄 Rewind requested - Current state:`);
+    console.log(`🔄 - isAnimating: ${isAnimating}`);
+    console.log(`🔄 - isRewinding: ${isRewinding}`);
+    console.log(`🔄 - isProcessingSwipe: ${isProcessingSwipe}`);
+    console.log(`🔄 - cardHistory.length: ${cardHistory.length}`);
+    console.log(`🔄 - users.length: ${users.length}`);
+    console.log(`🔄 - currentIndex: ${currentIndex}`);
+    
+    if (!isAnimating && !isRewinding && !isProcessingSwipe && cardHistory.length > 0) {
+      setIsAnimating(true);
+      setIsRewinding(true);
+      
+      // Get the last swiped card from history
+      const lastSwipedCard = cardHistory[cardHistory.length - 1];
+      console.log(`🔄 Rewind: Restoring card: ${lastSwipedCard.name || lastSwipedCard.username}`);
+      
+      // Remove the last card from history
+      const newHistory = cardHistory.slice(0, -1);
+      setCardHistory(newHistory);
+      console.log(`🔄 Rewind: Card history reduced to ${newHistory.length} cards`);
+      
+      // Add the card back to the beginning of users array
+      const newUsers = [lastSwipedCard, ...users];
+      setUsers(newUsers);
+      console.log(`🔄 Rewind: Added card back to users array, total users: ${newUsers.length}`);
+      
+      // Reset current index to 0 since we're adding the card at the beginning
+      setCurrentIndex(0);
+      console.log(`🔄 Rewind: Current index reset to 0`);
+      
+      // Increment rewind counter to force swiper re-render
+      setRewindCounter(prev => prev + 1);
+      console.log(`🔄 Rewind: Incremented rewind counter to force re-render`);
+      
+      // Use a timeout to ensure the state updates are processed
+      setTimeout(() => {
+        // Reset animation states
+        setIsAnimating(false);
+        setIsRewinding(false);
+        console.log('🔄 Rewind animation completed');
+      }, 200);
+    } else {
+      console.log(`🔄 Rewind blocked: isAnimating=${isAnimating}, isRewinding=${isRewinding}, isProcessingSwipe=${isProcessingSwipe}, cardHistory.length=${cardHistory.length}`);
+    }
+  }, [isAnimating, isRewinding, isProcessingSwipe, cardHistory, users, currentIndex]);
+
+  // Handle swipe action
+  const handleSwipe = useCallback(async (direction, swipedUser) => {
+    if (isAnimating) return;
+    
+    // Block filtering updates during and shortly after swipe to avoid flashes
+    filterCooldownUntilRef.current = Date.now() + 350;
+    
+    setIsAnimating(true);
+    setIsProcessingSwipe(true);
+    
+    const swipedUserId = swipedUser._id || swipedUser.id;
+    
+    // Optimistically update UI first for instant responsiveness
+    setCardHistory(prev => {
+      const newHistory = [...prev, swipedUser];
+      console.log(`📚 Card history updated: ${prev.length} → ${newHistory.length} cards`);
+      console.log(`📚 Swiped user: ${swipedUser.name || swipedUser.username}`);
+      console.log(`📚 New history length: ${newHistory.length}`);
+      return newHistory;
+    });
+    
+    // currentIndex will be updated in onSwiped callbacks to stay in sync with Swiper
+    
+    console.log(`🎯 Swipe completed for: ${swipedUser.name || swipedUser.username}`);
+    console.log(`🎯 Card history should now be: ${cardHistory.length + 1} cards`);
+    
+    // Reduce animation timeout to match swiper animation
+    setTimeout(() => {
+      setIsAnimating(false);
+      setIsProcessingSwipe(false);
+      console.log(`🎯 Animation states reset after swipe`);
+    }, 150); // Reduced from 300ms to 150ms
+    
+    // Fire-and-forget API call to avoid blocking UI
+    if (profile && token && swipedUser && swipedUserId) {
+      (async () => {
+        try {
+          let updatedLikes = Array.isArray(profile.likes) ? [...profile.likes] : [];
+          let updatedDislikes = Array.isArray(profile.dislikes) ? [...profile.dislikes] : [];
+          
+          if (direction === 'right') {
+            if (!updatedLikes.includes(swipedUserId)) updatedLikes.push(swipedUserId);
+            updatedDislikes = updatedDislikes.filter(id => id !== swipedUserId);
+          } else {
+            if (!updatedDislikes.includes(swipedUserId)) updatedDislikes.push(swipedUserId);
+            updatedLikes = updatedLikes.filter(id => id !== swipedUserId);
+          }
+          
+          const response = await axios.put(`${API_BASE_URL}/auth/update-likes-dislikes`, {
+            likes: updatedLikes,
+            dislikes: updatedDislikes
+          }, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          updateUser(response.data);
+        } catch (err) {
+          // Error handling for like/dislike update
+        }
+      })();
+    }
+  }, [isAnimating, profile, token, updateUser]);
 
   // Button swipe handlers
   const handleButtonSwipe = useCallback((direction) => {
-    if (isAnimating || currentIndex >= users.length) return;
-    handleSwipe(direction);
-  }, [handleSwipe, isAnimating, currentIndex, users.length]);
-
-  // Animated styles for card container (position only)
-  const cardContainerStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateX: translateX.value },
-        { translateY: translateY.value },
-      ],
-      opacity: opacity.value,
-    };
-  });
-
-  // Animated styles for card content (rotation and scale)
-  const cardContentStyle = useAnimatedStyle(() => {
-    const rotation = interpolate(
-      translateX.value,
-      [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
-      [-30, 0, 30],
-      Extrapolate.CLAMP
-    );
+    console.log(`🔘 Button swipe: direction=${direction}, isAnimating=${isAnimating}, isProcessingSwipe=${isProcessingSwipe}, currentIndex=${currentIndex}, cards.length=${swiperCardsRef.current.length}`);
     
-    return {
-      transform: [
-        { rotate: `${rotation}deg` },
-        { scale: scale.value },
-      ],
-    };
-  });
-
-  const nextCardAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: nextCardScale.value }],
-    opacity: nextCardOpacity.value,
-  }));
-
-  // Overlay animations
-  const likeOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [0, SCREEN_WIDTH * 0.3],
-      [0, 1],
-      Extrapolate.CLAMP
-    ),
-  }));
-
-  const dislikeOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [-SCREEN_WIDTH * 0.3, 0],
-      [1, 0],
-      Extrapolate.CLAMP
-    ),
-  }));
-
-  // Button overlay animations
-  const likeButtonOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [SCREEN_WIDTH * 0.24, SCREEN_WIDTH * 0.3],
-      [0, 1],
-      Extrapolate.CLAMP
-    ),
-  }));
-
-  const dislikeButtonOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [-SCREEN_WIDTH * 0.3, -SCREEN_WIDTH * 0.24],
-      [1, 0],
-      Extrapolate.CLAMP
-    ),
-  }));
-
-  // Data fetching
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/admin/users/home`);
-        const data = await response.json();
-        if (data.success) {
-          const usersWithPhotos = data.users.filter(user => {
-            if (Array.isArray(user.profilePictures)) {
-              return user.profilePictures.length > 0 && user.profilePictures[0];
-            }
-            return user.profilePictures && user.profilePictures.length > 0;
-          });
-          // Exclude current user from swipe list
-          if (profile && profile._id) {
-            setUsers(usersWithPhotos.filter(u => u._id !== profile._id && u.id !== profile._id));
-          } else {
-            setUsers(usersWithPhotos);
-          }
+    if (isAnimating || isProcessingSwipe || currentIndex >= swiperCardsRef.current.length) {
+      console.log('❌ Button swipe blocked: isAnimating, isProcessingSwipe, or invalid index');
+      return;
+    }
+    
+    // Let Swiper perform the swipe so that its callbacks keep state in sync
+    try {
+      if (swiperRef.current) {
+        if (direction === 1) {
+          swiperRef.current.swipeRight();
         } else {
-          setError('Failed to fetch users');
+          swiperRef.current.swipeLeft();
         }
-      } catch (err) {
-        setError('Failed to fetch users');
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchUsers();
-  }, [profile]);
+    } catch (err) {
+      console.log('⚠️ Error invoking swiper swipe:', err);
+      // Fallback: directly trigger handleSwipe if swiper command fails
+      const list = swiperCardsRef.current;
+      const currentUser = list[currentIndex];
+      if (currentUser) {
+        handleSwipe(direction === 1 ? 'right' : 'left', currentUser);
+      }
+    }
+  }, [handleSwipe, isAnimating, isProcessingSwipe, currentIndex]);
 
-  // Format balance with commas
+  // Function to apply basic filters to users
+  const applyBasicFilters = useCallback((usersToFilter) => {
+    if (!usersToFilter || usersToFilter.length === 0) {
+      return [];
+    }
+
+    // If no filters are active, return all users
+    if (!filtersActive || Object.keys(activeFilters).length === 0) {
+      return usersToFilter;
+    }
+
+    let filteredUsers = usersToFilter;
+
+    // Apply age filter
+    if (activeFilters.ageRange && activeFilters.ageRange.length === 2) {
+      const [minAge, maxAge] = activeFilters.ageRange;
+      filteredUsers = filteredUsers.filter(user => {
+        const userAge = getAge(user);
+        return userAge !== null && userAge >= minAge && userAge <= maxAge;
+      });
+    }
+
+    // Apply location filter
+    if (activeFilters.location && activeFilters.location !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.location && user.location.toLowerCase() === activeFilters.location.toLowerCase()
+      );
+    }
+
+    // Apply verified filter
+    if (activeFilters.verifiedOnly) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.verificationStatus === 'true'
+      );
+    }
+
+    // Apply height filter
+    if (activeFilters.heightRange && activeFilters.heightRange.length === 2) {
+      const [minHeight, maxHeight] = activeFilters.heightRange;
+      filteredUsers = filteredUsers.filter(user => {
+        if (user.height) {
+          // Extract numeric height from string format like "5'8\" (173 cm)"
+          const heightMatch = user.height.match(/\((\d+)\s*cm\)/);
+          if (heightMatch) {
+            const heightCm = parseInt(heightMatch[1]);
+            return heightCm >= minHeight && heightCm <= maxHeight;
+          }
+        }
+        return true; // Include users without height if filter can't be applied
+      });
+    }
+
+    // Apply relationship type filter
+    if (activeFilters.relationshipType && activeFilters.relationshipType !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.goal === activeFilters.relationshipType
+      );
+    }
+
+    // Apply education level filter
+    if (activeFilters.educationLevel && activeFilters.educationLevel !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.education === activeFilters.educationLevel
+      );
+    }
+
+    // Apply zodiac sign filter
+    if (activeFilters.zodiacSign && activeFilters.zodiacSign !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.zodiac === activeFilters.zodiacSign
+      );
+    }
+
+    // Apply family plan filter
+    if (activeFilters.familyPlan && activeFilters.familyPlan !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.kids === activeFilters.familyPlan
+      );
+    }
+
+    // Apply personality filter
+    if (activeFilters.personality && activeFilters.personality !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.personality === activeFilters.personality
+      );
+    }
+
+    // Apply religion filter
+    if (activeFilters.religion && activeFilters.religion !== 'All') {
+      filteredUsers = filteredUsers.filter(user => 
+        user.religon === activeFilters.religion
+      );
+    }
+
+    // Apply lifestyle choices filter
+    if (activeFilters.lifestyleChoices && activeFilters.lifestyleChoices.length > 0) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.lifestyle && activeFilters.lifestyleChoices.some(choice => 
+          user.lifestyle.includes(choice)
+        )
+      );
+    }
+
+    // Apply similar interests filter
+    if (activeFilters.similarInterests && profile?.interests && profile.interests.length > 0) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.interests && user.interests.some(interest => 
+          profile.interests.includes(interest)
+        )
+      );
+    }
+
+    console.log(`🔍 Applied filters: ${filteredUsers.length} users remaining out of ${usersToFilter.length}`);
+    return filteredUsers;
+  }, [filtersActive, activeFilters, profile?.interests]);
+
+  // Function to fetch users from API
+  const fetchUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/admin/users/home`);
+      const data = await response.json();
+      
+      if (data.success) {
+        filterAndSetUsers(data.users, false, true); // Preserve history when fetching users
+      } else {
+        setError('Failed to fetch users');
+      }
+    } catch (err) {
+      setError('Failed to fetch users');
+    } finally {
+      setLoading(false);
+    }
+  }, [filterAndSetUsers]);
+
+  // Initialize users from context or fetch if needed
+  useEffect(() => {
+    if (contextUsers && contextUsers.length > 0 && users.length === 0) {
+      filterAndSetUsers(contextUsers, false, true); // Preserve history when initializing
+    } else if (initialized && !loading && users.length === 0) {
+      // Fallback: fetch users if not preloaded
+      fetchUsers();
+    }
+  }, [contextUsers, initialized, profile, users.length, fetchUsers]);
+
+  // Helper to ensure a user has a valid profile image before display
+  const userHasProfilePhoto = useCallback((u) => {
+    if (!u) return false;
+    try {
+      const src = getProfileImageSource(u);
+      return !!src;
+    } catch (e) {
+      return false;
+    }
+  }, [getProfileImageSource]);
+
+  // Function to filter users based on connections and other criteria
+  const filterAndSetUsers = useCallback((usersToFilter, includeDisliked = false, preserveHistory = false) => {
+    // Prevent filtering during swipe operations or cooldown to preserve card history and avoid flashes
+    if (isProcessingSwipe || Date.now() < filterCooldownUntilRef.current) {
+      console.log('🚫 Skipping filterAndSetUsers during swipe operation or cooldown');
+      return;
+    }
+    
+    if (!usersToFilter || usersToFilter.length === 0) {
+      setUsers([]);
+      return;
+    }
+
+    let filteredUsers = usersToFilter;
+
+    // Apply basic filters if they're active
+    if (filtersActive) {
+      filteredUsers = applyBasicFilters(usersToFilter);
+    }
+
+    // Enforce presence of at least one profile picture
+    filteredUsers = filteredUsers.filter(userHasProfilePhoto);
+
+    // Apply connection/likes/dislikes filtering and exclude current user
+    const finalFilteredUsers = filteredUsers.filter(user => {
+      if (!user || !user._id) return false;
+      
+      // IMPORTANT: Exclude current user's profile
+      if (profile && user._id === profile._id) {
+        console.log('🚫 Excluding current user profile:', user.name || user.username);
+        return false;
+      }
+      
+      // Check if user is already connected
+      if (profile?.connections?.includes(user._id)) return false;
+      
+      // Check if user has already been liked or disliked
+      if (profile?.likes?.includes(user._id)) return false;
+      if (profile?.dislikes?.includes(user._id) && !includeDisliked) return false;
+      
+      return true;
+    });
+
+    // Skip update if unchanged to avoid unnecessary remounts
+    const sameLength = finalFilteredUsers.length === usersRef.current.length;
+    const sameIds = sameLength && finalFilteredUsers.every((u, i) => (u?._id || u?.id) === (usersRef.current[i]?._id || usersRef.current[i]?.id));
+    if (sameIds) {
+      console.log('ℹ️ Users unchanged; skipping setUsers to prevent remount');
+    } else {
+      console.log(`👥 Filtered users: ${finalFilteredUsers.length} out of ${usersToFilter.length} (excluded current user and connections)`);
+      setUsers(finalFilteredUsers);
+    }
+
+    // Only reset index if not preserving history
+    if (!preserveHistory) {
+      setCurrentIndex(0);
+    }
+    
+    // Only clear card history if explicitly requested
+    if (!preserveHistory) {
+      setCardHistory([]); // Clear card history when users change
+      console.log('🧹 Card history cleared due to user change');
+    } else {
+      console.log('💾 Card history preserved during user update');
+    }
+  }, [filtersActive, profile, applyBasicFilters, isProcessingSwipe]);
+
+  // Refresh balance and users when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (dataReady && initialized && !loading && token && profile) {
+        refreshBalance();
+        
+        // Use context users if available, otherwise fetch fresh
+        if (contextUsers && contextUsers.length > 0) {
+          filterAndSetUsers(contextUsers, false, true); // Preserve history when refreshing
+        } else {
+          // Fetch fresh users if context is empty
+          fetchUsers();
+        }
+      }
+    }, [dataReady, initialized, loading, token, profile, contextUsers, refreshBalance, filterAndSetUsers, fetchUsers])
+  );
+
+  // Ensure current index is valid when users change
+  useEffect(() => {
+    if (users.length > 0 && currentIndex >= users.length) {
+      setCurrentIndex(0);
+      console.log('🔧 Fixed invalid current index: reset to 0');
+    }
+  }, [users.length, currentIndex]);
+
+  // Debug logging for state changes
+  useEffect(() => {
+    console.log(`🎯 State update - Users: ${users.length}, Current Index: ${currentIndex}, Card History: ${cardHistory.length}`);
+  }, [users.length, currentIndex, cardHistory.length]);
+
+  // Helper functions
   const formatBalance = (amount) => {
     return amount?.toLocaleString?.() ?? '0';
   };
 
-  // Calculate age from dateOfBirth
-  const calculateAge = (dateOfBirth) => {
-    if (!dateOfBirth) return null;
+  // Check if there are any active filters
+  const hasActiveFilters = () => {
+    if (!filtersActive || !activeFilters) return false;
     
-    const birthDate = new Date(dateOfBirth);
-    const today = new Date();
-    
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    
-    return age;
+    return Object.values(activeFilters).some(value => 
+      value !== null && value !== false && 
+      (Array.isArray(value) ? value.length > 0 : true)
+    );
   };
 
-  // Fetch user balance from backend
-  const fetchUserBalance = async (authToken) => {
-    try {
-      if (!authToken) return;
-      const response = await axios.get(`${API_BASE_URL}/transaction/balance/current`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (response.data.success) {
-        setBalance(response.data.balance);
-      }
-    } catch (error) {
-      // Optionally handle error
-      // console.error('Error fetching balance:', error);
-    }
-  };
-
-  // Fetch user profile and token on mount
-  useEffect(() => {
-    const fetchUserProfile = async () => {
-      try {
-        const storedToken = await AsyncStorage.getItem('token');
-        setToken(storedToken);
-        if (!storedToken) {
-          setProfile(null);
-          return;
-        }
-        const response = await axios.get(`${API_BASE_URL}/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${storedToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        setProfile(response.data);
-        fetchUserBalance(storedToken); // Fetch balance after token is set
-      } catch (error) {
-        setProfile(null);
-      }
-    };
-    fetchUserProfile();
-  }, []);
-
-  // Log current user data whenever profile changes
-  useEffect(() => {
-    if (profile) {
-      console.log('=== CURRENT USER DATA ===');
-      console.log('Full Profile Object:', JSON.stringify(profile, null, 2));
-      console.log('User ID:', profile._id || profile.id);
-      console.log('Name:', profile.name);
-      console.log('Email:', profile.email);
-      console.log('Age:', profile.age);
-      console.log('Gender:', profile.gender);
-      console.log('Location:', profile.location);
-      console.log('Bio:', profile.bio);
-      console.log('Profile Picture:', profile.profilePicture);
-      console.log('Likes:', profile.likes);
-      console.log('Dislikes:', profile.dislikes);
-      console.log('Matches:', profile.matches);
-      console.log('Premium Status:', profile.isPremium);
-      console.log('Verification Status:', profile.isVerified);
-      console.log('Account Balance:', balance);
-      console.log('Token:', token ? 'Present' : 'Missing');
-      console.log('=== END CURRENT USER DATA ===');
-    } else {
-      console.log('=== CURRENT USER DATA ===');
-      console.log('No user profile available');
-      console.log('Token:', token ? 'Present' : 'Missing');
-      console.log('=== END CURRENT USER DATA ===');
-    }
-  }, [profile, balance, token]);
-
-  // Reset animations when index changes
-  useEffect(() => {
-    if (currentIndex < users.length) {
-      nextCardScale.value = 0.95;
-      nextCardOpacity.value = 0.8;
-    }
-  }, [currentIndex, users.length]);
-
-  // Helper to get profile image
-  const getProfileImage = (user) => {
-    const cloudFrontUrl = 'https://dk665xezaubcy.cloudfront.net';
-    let profilePic = user.profilePictures;
-    
-    if (Array.isArray(profilePic) && profilePic.length > 0) {
-      profilePic = profilePic[0];
-    }
-    
-    if (profilePic) {
-      if (profilePic.startsWith('/uploads/')) {
-        return `${cloudFrontUrl}${profilePic}`;
-      }
-      if (profilePic.startsWith('http')) {
-        return profilePic;
-      }
-      if (!profilePic.startsWith('/')) {
-        return `${cloudFrontUrl}/uploads/images/${profilePic}`;
-      }
-      return profilePic;
-    }
-    
-    return require('../../assets/model.jpg');
-  };
-
-  // Helper to get age (same as SwipeCard.js)
   const getAge = (user) => {
     if (user.age) return user.age;
     if (user.dateOfBirth) {
@@ -445,152 +614,143 @@ const Home = ({ navigation }) => {
     return null;
   };
 
-  // Render card component
-  const renderCard = () => {
-    if (currentIndex >= users.length) {
-      return (
-        <View style={styles.endCard}>
-          <Text style={styles.endText}>No more profiles!</Text>
-          <TouchableOpacity 
-            style={styles.resetButton}
-            onPress={() => {
-              setCurrentIndex(0);
-              resetCard();
-            }}
-          >
-            <Text style={styles.resetText}>Start Over</Text>
-          </TouchableOpacity>
-        </View>
-      );
+  // Render card component for deck swiper
+  const renderCard = (user, index) => {
+    if (!user) {
+      return null;
+    }
+    
+    if (!user._id && !user.id) {
+      return null;
     }
 
-    const currentUser = users[currentIndex];
-    const nextUser = users[currentIndex + 1];
-
-    // Log current user details
-    if (currentUser) {
-      console.log('=== CURRENT CARD USER DATA ===');
-      console.log('Full User Object:', JSON.stringify(currentUser, null, 2));
-      console.log('--- Available Fields from Complete User Data ---');
-      console.log('User ID:', currentUser._id || currentUser.id);
-      console.log('Username:', currentUser.username);
-      console.log('Name:', currentUser.name);
-      console.log('Phone:', currentUser.phone);
-      console.log('Email:', currentUser.email);
-      console.log('Goal:', currentUser.goal);
-      console.log('Height:', currentUser.height);
-      console.log('Gender:', currentUser.gender);
-      console.log('Interests:', currentUser.interests);
-      console.log('Kids:', currentUser.kids);
-      console.log('Career:', currentUser.career);
-      console.log('Zodiac:', currentUser.zodiac);
-      console.log('Location:', currentUser.location);
-      console.log('Age:', currentUser.age);
-      console.log('Religion:', currentUser.religon);
-      console.log('Personality:', currentUser.personality);
-      console.log('Lifestyle:', currentUser.lifestyle);
-      console.log('Education:', currentUser.education);
-      console.log('Date of Birth:', currentUser.dateOfBirth);
-      console.log('Profile Pictures:', currentUser.profilePictures);
-      console.log('Verification Status:', currentUser.verificationStatus);
-      console.log('Likes:', currentUser.likes);
-      console.log('Dislikes:', currentUser.dislikes);
-      console.log('Connections:', currentUser.connections);
-      console.log('Created At:', currentUser.createdAt);
-      console.log('--- End Available Fields ---');
-      console.log('=== END CURRENT CARD USER DATA ===');
+    const profileImageSource = getProfileImageSource(user);
+    if (!profileImageSource) {
+      return null;
     }
-
-    // Improved UI from SwipeCard.js for current card
+    
+    const isTopCard = index === currentIndex;
+    const rightOpacity = isTopCard ? Math.max(0, Math.min(1, Math.max(0, swipeX) / 15)) : 0; // start immediately with very small threshold
+    const leftOpacity = isTopCard ? Math.max(0, Math.min(1, Math.max(0, -swipeX) / 15)) : 0; // start immediately with very small threshold
+    
     return (
-      <View style={styles.cardsContainer}>
-        {/* Next Card */}
-        {nextUser && (
-          <Animated.View style={[styles.card, nextCardAnimatedStyle]}>
-            <View style={styles.cardInner}>
-              <Image 
-                source={{ uri: getProfileImage(nextUser) }} 
-                style={styles.cardImage}
-                resizeMode="cover"
+      <View style={styles.card}>
+        <View style={styles.cardInner}>
+          <Image 
+            source={profileImageSource} 
+            style={[styles.cardImage, styles.cardImageScaled]}
+            resizeMode="cover"
+            onError={(error) => {
+              // Image load error for user
+            }}
+          />
+          
+          {/* Main Gradient */}
+          <LinearGradient
+            colors={["transparent", "transparent", "rgba(0, 0, 0, 0.5)", "rgb(0, 0, 0)"]}
+            style={styles.overlayGradient}
+            locations={[0, 0.6, 0.8, 1]}
+          />
+
+          {/* Early right-swipe overlay based on swipeX */}
+          {rightOpacity > 0 && (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { zIndex: 3, opacity: rightOpacity }]}>
+              <LinearGradient
+                colors={["rgba(110,197,49,0)", "rgba(110,197,49,0.7)"]}
+                locations={[0.1755, 0.7904]}
+                start={{ x: 0, y: 1 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
               />
               <LinearGradient
-                colors={["transparent", "transparent", "rgba(0, 0, 0, 0.5)", "rgb(0, 0, 0)"]}
-                style={styles.overlayGradient}
-                locations={[0, 0.6, 0.8, 1]}
+                colors={["rgba(18,18,18,0)", "#121212"]}
+                locations={[0.676, 0.9813]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
               />
-              <View style={styles.userInfoSwipe}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name}>{nextUser.name}</Text>
-                  {getAge(nextUser) !== null && <Text style={styles.age}>, {getAge(nextUser)}</Text>}
-                  <View style={styles.verifiedBadgeSwipe}>
-                    <MaterialIcons name="verified" size={32} color="#ec066a" />
-                  </View>
-                </View>
-                <View style={styles.locationRow}>
-                  <Ionicons name="location" size={16} color="#fff" />
-                  <Text style={styles.location}>{nextUser.location || ''}</Text>
-                </View>
-              </View>
             </View>
-          </Animated.View>
-        )}
-
-          {/* Current Card */}
-          {currentUser && (
-            <PanGestureHandler onGestureEvent={gestureHandler}>
-              <Animated.View style={[styles.card, cardContainerStyle]}>
-                <Animated.View style={[styles.cardInner, cardContentStyle]}>
-                  <Image 
-                    source={{ uri: getProfileImage(currentUser) }} 
-                    style={styles.cardImage}
-                    resizeMode="cover"
-                  />
-                  {/* Like/Dislike Overlay */}
-                  <Animated.View style={[styles.overlay, likeOverlayStyle]} pointerEvents="none" />
-                  <Animated.View style={[styles.overlay, dislikeOverlayStyle]} pointerEvents="none" />
-                  {/* Main Gradient */}
-                  <LinearGradient
-                    colors={["transparent", "transparent", "rgba(0, 0, 0, 0.5)", "rgb(0, 0, 0)"]}
-                    style={styles.overlayGradient}
-                    locations={[0, 0.6, 0.8, 1]}
-                  />
-                  {/* User Info */}
-                  <View style={styles.userInfoSwipe}>
-                    <View style={styles.nameRow}>
-                      <Text style={styles.name}>{currentUser.name}</Text>
-                      {getAge(currentUser) !== null && <Text style={styles.age}>, {getAge(currentUser)}</Text>}
-                      <View style={styles.verifiedBadgeSwipe}>
-                        <MaterialIcons name="verified" size={32} color="#ec066a" />
-                      </View>
-                    </View>
-                    <View style={styles.locationRow}>
-                      <Ionicons name="location" size={16} color="#fff" />
-                      <Text style={styles.location}>{currentUser.location || ''}</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.cardTouchable}
-                    activeOpacity={1}
-                    onPress={() => {
-                      if (!isAnimating) {
-                        const swipedUserId = currentUser._id || currentUser.id;
-                        navigation.navigate('MatchDetail', { userId: swipedUserId });
-                      }
-                    }}
-                  />
-                </Animated.View>
-              </Animated.View>
-            </PanGestureHandler>
           )}
-        </View>
-      );
-    };
 
-  // Loading and error states
-  if (loading && users.length === 0) {
+          {/* Early left-swipe overlay based on swipeX */}
+          {leftOpacity > 0 && (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { zIndex: 3, opacity: leftOpacity }]}>
+              <LinearGradient
+                colors={["rgba(220,53,69,0)", "rgba(220,53,69,0.7)"]}
+                locations={[0.1755, 0.7904]}
+                start={{ x: 0, y: 1 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <LinearGradient
+                colors={["rgba(18,18,18,0)", "#121212"]}
+                locations={[0.676, 0.9813]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
+          )}
+          
+          {/* User Info */}
+          <View style={styles.userInfoSwipe}>
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{user.name}</Text>
+              {getAge(user) !== null && <Text style={styles.age}>, {getAge(user)}</Text>}
+              {(user?.verificationStatus === 'verified') && (
+                <View style={styles.verifiedBadgeSwipe}>
+                  <MaterialIcons name="verified" size={32} color="#ec066a" />
+                </View>
+              )}
+            </View>
+            <View style={styles.locationRow}>
+              <Ionicons name="location" size={16} color="#fff" />
+              <Text style={styles.location}>{user.location || ''}</Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity 
+            style={[styles.cardTouchable, { zIndex: 5 }]}
+            activeOpacity={1}
+            onPress={() => {
+              const swipedUserId = user._id || user.id;
+              navigation.navigate('MatchDetail', { userId: swipedUserId });
+            }}
+          />
+        </View>
+      </View>
+    );
+  };
+
+  // Render end card when no more profiles
+  const renderEndCard = () => {
+    return (
+      <View style={styles.endCard}>
+        <Text style={styles.endText}>No more profiles!</Text>
+        <Text style={styles.endSubText}>Start over to see profiles again.</Text>
+        <TouchableOpacity 
+          style={[styles.resetButton, loading && styles.resetButtonDisabled]}
+          onPress={handleStartOver}
+          disabled={loading}
+        >
+          <Text style={styles.resetText}>
+            {loading ? 'Loading...' : 'Start Over'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // Show loading animation until context is initialized and data is loaded
+  if (!initialized || loading || !dataReady || !profile) {
     return (
       <ScreenWrapper backgroundColor="#000" statusBarColor="#000" barStyle="light-content" paddingTop={24}>
         <View style={styles.centerContainer}>
+          <ActivityIndicator 
+            size="large" 
+            color="#ec066a" 
+            style={styles.loadingSpinner}
+          />
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </ScreenWrapper>
@@ -621,9 +781,14 @@ const Home = ({ navigation }) => {
           <View style={styles.coinContainer}>
             <Text style={styles.coinText}>₦{formatBalance(balance)}</Text>
           </View>
-          <TouchableOpacity onPress={() => navigation.navigate('BasicFilters')}>
+          
+          
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('BasicFilters')}
+            style={styles.filterButton}
+          >
             <Image 
-              source={require('../../assets/filter.png')}
+              source={require('../../assets/icons/filter.png')}
               style={styles.filterIcon}
             />
           </TouchableOpacity>
@@ -632,53 +797,193 @@ const Home = ({ navigation }) => {
 
       {/* Cards */}
       <View style={styles.cardsArea}>
-        {renderCard()}
+        {swiperCards.length > 0 && swiperCards.every(user => user && (user._id || user.id)) ? (
+          <Swiper
+            key={`swiper-${swiperCards.length}-${rewindCounter}`}
+            ref={swiperRef}
+            cards={swiperCards}
+            renderCard={renderCard}
+            onSwipedLeft={(cardIndex) => {
+              const list = swiperCardsRef.current;
+              const swipedUser = list[cardIndex];
+              if (!list || cardIndex < 0 || cardIndex >= list.length) {
+                console.log('❌ Invalid cardIndex in onSwipedLeft:', cardIndex);
+                return;
+              }
+              if (swipedUser && !isProcessingSwipe) {
+                console.log(`👈 Swiper left swipe detected at index: ${cardIndex}`);
+                console.log(`👈 Swiping left: ${swipedUser.name || swipedUser.username}`);
+                console.log(`👈 Current card history before swipe: ${cardHistory.length} cards`);
+                setCurrentIndex(cardIndex + 1);
+                handleSwipe('left', swipedUser);
+              } else {
+                console.log('❌ No user found at card index or swipe in progress:', cardIndex);
+              }
+              // Immediately reset swipe visual
+              setSwipeX(0);
+            }}
+            onSwipedRight={(cardIndex) => {
+              const list = swiperCardsRef.current;
+              const swipedUser = list[cardIndex];
+              if (!list || cardIndex < 0 || cardIndex >= list.length) {
+                console.log('❌ Invalid cardIndex in onSwipedRight:', cardIndex);
+                return;
+              }
+              if (swipedUser && !isProcessingSwipe) {
+                console.log(`👉 Swiper right swipe detected at index: ${cardIndex}`);
+                console.log(`👉 Swiping right: ${swipedUser.name || swipedUser.username}`);
+                console.log(`👉 Current card history before swipe: ${cardHistory.length} cards`);
+                setCurrentIndex(cardIndex + 1);
+                handleSwipe('right', swipedUser);
+              } else {
+                console.log('❌ No user found at card index or swipe in progress:', cardIndex);
+              }
+              // Immediately reset swipe visual
+              setSwipeX(0);
+            }}
+            onSwipedAborted={() => {
+              console.log('🔄 Swipe aborted, resetting states');
+              setIsAnimating(false);
+              setIsProcessingSwipe(false);
+              // Immediately reset swipeX to clear overlay
+              setSwipeX(0);
+            }}
+            onSwipedAll={renderEndCard}
+            onSwiped={(cardIndex, direction) => {
+              console.log(`🎯 Swiper general swipe: index=${cardIndex}, direction=${direction}`);
+              // Reset swipeX after a short delay to ensure smooth transition
+              setTimeout(() => setSwipeX(0), 50);
+            }}
+            onSwiping={(x, y) => {
+              // Update swipeX immediately for responsive overlay
+              setSwipeX(x);
+            }}
+            onSwipingAborted={() => {
+              // Immediately clear overlay when swiping is interrupted
+              setSwipeX(0);
+            }}
+            backgroundColor={'transparent'}
+            stackSize={2}
+            stackScale={10}
+            stackSeparation={14}
+            animateCardOpacity={true}
+            swipeAnimationDuration={150}
+            disableBottomSwipe={true}
+            disableTopSwipe={true}
+            animateOverlayLabelsOpacity
+            overlayLabels={{
+              left: {
+                element: (
+                  <View style={styles.overlay}> 
+                    <LinearGradient
+                      colors={["rgba(220,53,69,0)", "rgba(220,53,69,0.7)"]}
+                      locations={[0.1755, 0.7904]}
+                      start={{ x: 0, y: 1 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <LinearGradient
+                      colors={["rgba(18,18,18,0)", "#121212"]}
+                      locations={[0.676, 0.9813]}
+                      start={{ x: 0.5, y: 0 }}
+                      end={{ x: 0.5, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  </View>
+                ),
+                style: { wrapper: { flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } }
+              },
+              right: {
+                element: (
+                  <View style={styles.overlay}> 
+                    {/* Green diagonal gradient (approx 343.57deg) */}
+                    <LinearGradient
+                      colors={["rgba(110,197,49,0)", "rgba(110,197,49,0.7)"]}
+                      locations={[0.1755, 0.7904]}
+                      start={{ x: 0, y: 1 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    {/* Dark bottom fade (approx 180deg) */}
+                    <LinearGradient
+                      colors={["rgba(18,18,18,0)", "#121212"]}
+                      locations={[0.676, 0.9813]}
+                      start={{ x: 0.5, y: 0 }}
+                      end={{ x: 0.5, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  </View>
+                ),
+                style: { wrapper: { flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } }
+              }
+            }}
+            cardStyle={styles.swiperCard}
+            containerStyle={styles.swiperContainer}
+          />
+        ) : (
+          renderEndCard()
+        )}
       </View>
 
       {/* Action Buttons */}
-      <View style={styles.actions}>
-        {/* Dislike Button */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={[styles.button, styles.dislikeButton]}
-            onPress={() => handleButtonSwipe(-1)}
-            disabled={isAnimating}
-          >
-            <FontAwesome6 name="xmark" size={42} color="#ec066a" style={styles.xIcon} />
-          </TouchableOpacity>
-          <Animated.View style={[styles.button, styles.dislikeButtonOverlay, dislikeButtonOverlayStyle]}>
-            <FontAwesome6 name="xmark" size={38} color="#fff" style={styles.xIcon} />
-          </Animated.View>
-        </View>
+      {initialized && swiperCards.length > 0 && currentIndex < swiperCards.length && (
+        <View style={[
+          styles.actions,
+          { gap: cardHistory.length > 0 ? 16 : 24 } // Wider gap when only two buttons
+        ]}>
+          {/* Dislike Button */}
+          <View style={[styles.button, styles.dislikeButton, { backgroundColor: swipeX < -12 ? '#dc3545' : '#fff' }]}>
+            <TouchableOpacity 
+              style={{flex: 1, alignItems: 'center', justifyContent: 'center'}} 
+              onPress={() => handleButtonSwipe(-1)}
+              disabled={isAnimating}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: swipeX < -12 ? '#fff' : '#ec066a' }}>
+                <FontAwesome6 name="xmark" size={46} />
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Rewind Button */}
-        {currentIndex > 0 && (
-          <TouchableOpacity
-            style={[styles.button, styles.rewindButton]}
-            onPress={() => {
-              setCurrentIndex(currentIndex - 1);
-              resetCard();
-            }}
-            activeOpacity={0.8}
-          >
-            <FontAwesome5 name="undo" size={32} color="#fff" />
-          </TouchableOpacity>
-        )}
+          {/* Rewind Button - Show when there are cards in history */}
+          {cardHistory.length > 0 && (
+            <View 
+              style={[
+                styles.button, 
+                styles.rewindButton,
+                { 
+                  opacity: (!isProcessingSwipe && !isRewinding) ? 1 : 0.3,
+                  transform: [{ scale: isAnimating ? 0.9 : 1 }],
+                  pointerEvents: (!isProcessingSwipe && !isRewinding) ? 'auto' : 'none'
+                }
+              ]}
+            >
+              <TouchableOpacity
+                style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}
+                onPress={handleRewind}
+                activeOpacity={0.8}
+                disabled={isProcessingSwipe || isRewinding}
+              >
+                <FontAwesome6 name="rotate-left" size={32} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          
 
-        {/* Like Button */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={[styles.button, styles.likeButton]}
-            onPress={() => handleButtonSwipe(1)}
-            disabled={isAnimating}
-          >
-            <Ionicons name="heart" size={40} color="#fff" />
-          </TouchableOpacity>
-          <Animated.View style={[styles.button, styles.likeButtonOverlay, likeButtonOverlayStyle]}>
-            <Ionicons name="heart" size={40} color="#fff" />
-          </Animated.View>
+          {/* Like Button */}
+          <View style={[styles.button, styles.likeButton, { backgroundColor: swipeX > 12 ? '#6ec531' : '#ec066a' }]}>
+            <TouchableOpacity 
+              style={{flex: 1, alignItems: 'center', justifyContent: 'center'}} 
+              onPress={() => handleButtonSwipe(1)}
+              disabled={isAnimating}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="heart" size={40} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
     </ScreenWrapper>
   );
 };
@@ -717,34 +1022,48 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontFamily: FONTS.regular,
   },
+  debugContainer: {
+    display: 'none',
+  },
+  debugText: {
+    display: 'none',
+  },
+  debugButton: {
+    display: 'none',
+  },
+  filterButton: {
+    position: 'relative',
+    padding: 4,
+  },
   filterIcon: {
     width: 18,
     height: 16,
   },
-  
+
   // Cards area
   cardsArea: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingHorizontal: 20,
-    paddingTop: 20, // Add some top padding
+    marginTop: -34,
   },
-  cardsContainer: {
+  swiperContainer: {
     width: SCREEN_WIDTH * 0.9,
-    height: SCREEN_HEIGHT * 0.65,
-    alignItems: 'center',
-    justifyContent: 'center',
+    height: SCREEN_HEIGHT * 0.74,
   },
-  
+  swiperCard: {
+    width: SCREEN_WIDTH * 0.9,
+    height: SCREEN_HEIGHT * 0.74,
+  },
+
   // Card styles
   card: {
     width: SCREEN_WIDTH * 0.9,
-    height: SCREEN_HEIGHT * 0.65,
-    position: 'absolute',
-    backgroundColor: 'transparent', // Make container transparent
+    height: SCREEN_HEIGHT * 0.74,
+    backgroundColor: 'transparent',
   },
-  cardContent: {
+  cardInner: {
     flex: 1,
     borderRadius: 8,
     overflow: 'hidden',
@@ -756,9 +1075,11 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
   },
   cardTouchable: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   cardImage: {
     width: '100%',
@@ -767,7 +1088,10 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
-  
+  cardImageScaled: {
+    // Removed scale transform to match overlay size exactly
+  },
+
   // Overlay styles
   overlayGradient: {
     position: 'absolute',
@@ -775,52 +1099,24 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 1,
   },
-  swipeOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
-  
+
   // User info styles
-  userInfo: {
+  userInfoSwipe: {
     position: 'absolute',
-    bottom: 56,
-    left: 20,
-    right: 20,
-    zIndex: 10,
+    bottom: 126,
+    left: 16,
+    zIndex: 4,
+    flexDirection: 'column',
   },
-  status: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 90,
-    alignSelf: 'flex-start',
-    marginBottom: 8,
+  nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  activeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 8,
-    backgroundColor: '#4CD964',
-  },
-  statusText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '400',
-    fontFamily: FONTS.regular,
-  },
-  nameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
   },
   name: {
     fontSize: 32,
@@ -831,38 +1127,32 @@ const styles = StyleSheet.create({
     fontSize: 32,
     color: '#fff',
     fontWeight: '400',
-    marginRight: 5,
   },
-  verifiedBadge: {
-    marginLeft: 8,
+  verifiedBadgeSwipe: {
+    marginLeft: 4,
   },
-  locationContainer: {
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginVertical: 8,
   },
-  distance: {
-    fontSize: 16,
-    fontWeight: '400',
+  location: {
     color: '#fff',
+    fontSize: 18,
     marginLeft: 4,
-    fontFamily: FONTS.regular,
   },
-  
+
   // Action buttons
   actions: {
     position: 'absolute',
-    bottom: 124,
+    bottom: 94,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 24,
     paddingHorizontal: 20,
     zIndex: 999,
-  },
-  buttonContainer: {
-    position: 'relative',
   },
   button: {
     width: 64,
@@ -879,102 +1169,89 @@ const styles = StyleSheet.create({
   dislikeButton: {
     backgroundColor: '#fff',
   },
-  dislikeButtonOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    backgroundColor: '#dc3545',
-  },
   likeButton: {
     backgroundColor: '#ec066a',
-  },
-  likeButtonOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    backgroundColor: '#6EC531',
   },
   rewindButton: {
     backgroundColor: 'rgba(255,255,255,0.3)',
     shadowColor: 'transparent',
     elevation: 0,
   },
-  xIcon: {
-    transform: [{ scale: 1.2 }],
-    fontWeight: '900',
-  },
-  
+
   // End card styles
   endCard: {
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     backgroundColor: '#1E1E1E',
     width: SCREEN_WIDTH * 0.9,
     height: SCREEN_HEIGHT * 0.65,
     borderRadius: 8,
+    marginTop: SCREEN_HEIGHT * 0.15,
+    paddingTop: 40,
   },
   endText: {
     color: '#fff',
     fontSize: 24,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  endSubText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
     marginBottom: 20,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   resetButton: {
     backgroundColor: '#ec066a',
     padding: 12,
     borderRadius: 8,
+    opacity: 1,
+    marginTop: 10,
+  },
+  clearFiltersButton: {
+    backgroundColor: '#1E1E1E',
+    padding: 12,
+    borderRadius: 8,
+    opacity: 1,
+    marginBottom: 10,
+  },
+  resetButtonDisabled: {
+    opacity: 0.6,
   },
   resetText: {
     color: '#fff',
     fontSize: 16,
   },
-  
+
   // Loading and error states
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingSpinner: {
+    marginBottom: 20,
+  },
   loadingText: {
     color: '#fff',
     fontSize: 18,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+  splashLogo: {
+    width: SCREEN_WIDTH * 0.4,
+    height: SCREEN_WIDTH * 0.4 * 0.21, // Maintain aspect ratio
   },
   errorText: {
     color: 'red',
     fontSize: 18,
   },
-  cardInner: {
+  loadingContainer: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 2,
-  },
-  userInfoSwipe: {
-    position: 'absolute',
-    bottom: 56,
-    left: 16,
-    zIndex: 4,
-    flexDirection: 'column',
-  },
-  nameRow: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-  },
-  verifiedBadgeSwipe: {
-    marginLeft: 4,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  location: {
-    color: '#fff',
-    fontSize: 18,
-    marginLeft: 4,
+    backgroundColor: '#000',
   },
 });
 

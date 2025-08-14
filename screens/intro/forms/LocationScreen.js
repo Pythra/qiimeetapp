@@ -8,28 +8,43 @@ import styles from './onboardingStyles';
 import axios from 'axios';
 import { API_BASE_URL } from '../../../env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import StateSelectorModal from './StateSelectorModal';
 
 const LocationScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [locationData, setLocationData] = useState(null);
+  const [showStateSelector, setShowStateSelector] = useState(false);
+
+  // Helper to save location to backend
+  const saveLocationToBackend = async (locationString) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const requestBody = { location: locationString };
+      await axios.put(
+        `${API_BASE_URL}/auth/update`,
+        requestBody,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: 10000,
+        }
+      );
+      console.log('✅ Location saved successfully:', locationString);
+    } catch (err) {
+      console.log('❌ Location update error:', err.response?.data || err);
+    }
+  };
 
   const handleLocationAccess = async () => {
     setIsLoading(true);
-    
     try {
       // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
-
       if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission Denied',
-          'We need location access to match you with people nearby. You can enable this in your device settings.',
-          [
-            { text: 'Continue Anyway', onPress: () => navigation.replace('MainTabs') },
-            { text: 'Cancel', style: 'cancel' }
-          ]
-        );
         setIsLoading(false);
+        setShowStateSelector(true);
         return;
       }
 
@@ -69,67 +84,50 @@ const LocationScreen = ({ navigation }) => {
 
       // Save location to backend
       if (addressData) {
-        const token = await AsyncStorage.getItem('token');
         const locationString = `${addressData.region}`;
-        
-        console.log(' Token:', token ? 'Present' : 'Missing');
-        console.log(' Location string to save:', locationString);
-        console.log('🌐 API URL:', `${API_BASE_URL}/auth/update`);
-        
-        try {
-          const requestBody = { location: locationString };
-          console.log('📤 Request body:', JSON.stringify(requestBody));
-          
-          const res = await axios.put(
-            `${API_BASE_URL}/auth/update`,
-            requestBody,
-            { 
-              headers: { 
-                'Content-Type': 'application/json', 
-                Authorization: `Bearer ${token}` 
-              },
-              timeout: 10000 // 10 second timeout
-            }
-          );
-          
-          console.log('📍 Location update response:', res.data);
-          console.log(' Response status:', res.status);
-          
-          if (res.data && (res.data.success || res.data.message || res.status === 200)) {
-            console.log('✅ Location saved successfully:', locationString);
-          } else {
-            console.log('⚠️ Location update failed:', res.data.error || 'Unknown error');
-          }
-        } catch (err) {
-          console.log('❌ Location update error:', err.response?.data || err);
-          console.log('❌ Error status:', err.response?.status);
-          console.log('❌ Error message:', err.message);
-          console.log('❌ Full error object:', JSON.stringify(err, null, 2));
-          // Don't block navigation if location save fails
-        }
+        await saveLocationToBackend(locationString);
       } else {
         console.log('⚠️ No address data available to save');
       }
 
       // Simulate a brief delay to show the loading animation
-      setTimeout(() => {
+      setTimeout(async () => {
         setIsLoading(false);
-        // Navigate to main app
-        navigation.replace('MainTabs');
+        
+        // Wait a bit more for authentication state to fully establish
+        console.log('[LocationScreen] Waiting for auth state to establish before navigation...');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Increased delay for better auth sync
+        
+        // Navigate to main app using navigate instead of replace for better state sync
+        console.log('[LocationScreen] Navigating to MainTabs...');
+        navigation.navigate('MainTabs');
       }, 1500);
 
     } catch (error) {
       console.error('Error getting location:', error);
-      Alert.alert(
-        'Location Error',
-        'Unable to get your location. Please check your device settings and try again.',
-        [
-          { text: 'Continue Anyway', onPress: () => navigation.replace('MainTabs') },
-          { text: 'Try Again', onPress: () => setIsLoading(false) }
-        ]
-      );
       setIsLoading(false);
+      setShowStateSelector(true);
     }
+  };
+
+  // Handler for when user selects a state manually
+  const handleStateSelect = async (state) => {
+    setShowStateSelector(false);
+    setIsLoading(true);
+    await saveLocationToBackend(state);
+    setIsLoading(false);
+    
+    // Wait a bit for authentication state to fully establish
+    console.log('[LocationScreen] Waiting for auth state to establish before manual navigation...');
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Increased delay for better auth sync
+    
+    // Navigate to main app using navigate instead of replace for better state sync
+    console.log('[LocationScreen] Navigating to MainTabs from manual selection...');
+    navigation.navigate('MainTabs');
+  };
+
+  const handleStateCancel = () => {
+    setShowStateSelector(false);
   };
 
   return (
@@ -158,6 +156,11 @@ const LocationScreen = ({ navigation }) => {
         visible={isLoading}
         title="Getting your location..."
         subtitle="Please wait while we access your location and find nearby matches"
+      />
+      <StateSelectorModal
+        visible={showStateSelector}
+        onSelect={handleStateSelect}
+        onCancel={handleStateCancel}
       />
     </>
   );

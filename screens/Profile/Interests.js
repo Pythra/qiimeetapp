@@ -94,8 +94,12 @@ const Interests = ({ navigation }) => {
           ))}
         </View>
         {/* Category Tabs */}
-        <View style={styles.categoryTabsContainer}>
-          {categories.slice(0, 4).map(category => (
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryTabsContainer}
+        >
+          {categories.map(category => (
             <TouchableOpacity
               key={category.id}
               style={[styles.categoryTab, selectedCategory === category.id && styles.selectedCategoryTab]}
@@ -106,7 +110,7 @@ const Interests = ({ navigation }) => {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
         {/* Interests Grid */}
         <View style={styles.interestsGrid}>
           {categories.find(c => c.id === selectedCategory).interests
@@ -124,7 +128,7 @@ const Interests = ({ navigation }) => {
       </ScrollView>
       <TouchableOpacity
         style={styles.doneButton}
-        onPress={() => navigation && navigation.goBack()}
+        onPress={() => navigation.navigate('EditProfile', { interests: selectedInterests })}
       >
         <Text style={styles.doneButtonText}>Done</Text>
       </TouchableOpacity>
@@ -168,9 +172,8 @@ const styles = StyleSheet.create({
   },
   categoryTabsContainer: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-    marginLeft: 2,
+    paddingHorizontal: 2,
+    paddingBottom: 16,
   },
   categoryTab: {
     paddingVertical: 8,

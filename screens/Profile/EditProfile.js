@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialIcons, FontAwesome6 } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
@@ -10,18 +10,33 @@ import SharpCheck from '../../assets/sharpcheck.png';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
+import * as FileSystem from 'expo-file-system';
+import { useAuth } from '../../components/AuthContext';
 
 const MAX_PHOTOS = 6;
 
 const EditProfile = (props) => {
   const navigation = useNavigation();
   const route = props.route || {};
+  const { user, updateUser, initialized, loading: authLoading, getImageSource } = useAuth();
   const [selectedImages, setSelectedImages] = useState(Array(MAX_PHOTOS).fill(null));
-  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [work, setWork] = useState({ jobTitle: '', company: '' });
   const [education, setEducation] = useState('');
+  const [goal, setGoal] = useState(''); // Relationship goal
+  const [career, setCareer] = useState(''); // For Career screen
+  const [height, setHeight] = useState('');
+  const [kids, setKids] = useState('');
+  const [zodiac, setZodiac] = useState('');
+  const [personality, setPersonality] = useState('');
+  const [religon, setReligon] = useState('');
+  const [languages, setLanguages] = useState([]);
+  const [interests, setInterests] = useState([]);
+  const [lifestyle, setLifestyle] = useState([]);
+  const [bio, setBio] = useState('');
+  const [location, setLocation] = useState('');
+  const [imagePickerActive, setImagePickerActive] = useState(false); // Prevent double picker
     
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -36,51 +51,44 @@ const EditProfile = (props) => {
     return age;
   };
 
-  // Fetch user profile from backend
-  const fetchUserProfile = async () => {
-    try {
-      setLoading(true);
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        Alert.alert('Error', 'No authentication token found');
-        return;
-      }
+  // Load user data from AuthContext
+  const loadUserData = () => {
+    if (!user) return;
 
-      const response = await axios.get(`${API_BASE_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+    // Load existing profile pictures
+    if (user.profilePictures && user.profilePictures.length > 0) {
+      const existingImages = Array(MAX_PHOTOS).fill(null);
+      user.profilePictures.forEach((photo, index) => {
+        if (index < MAX_PHOTOS) {
+          existingImages[index] = { uri: photo };
         }
       });
-
-      const userData = response.data;
-      console.log('Fetched user data for edit:', userData);
-      setUser(userData);
-
-      // Load existing profile pictures
-      if (userData.profilePictures && userData.profilePictures.length > 0) {
-        const existingImages = Array(MAX_PHOTOS).fill(null);
-        userData.profilePictures.forEach((photo, index) => {
-          if (index < MAX_PHOTOS) {
-            existingImages[index] = { uri: photo };
-          }
-        });
-        setSelectedImages(existingImages);
-      }
-      // Load work and education from userData
-      setWork({ jobTitle: userData.career || '', company: userData.company || '' });
-      setEducation(userData.education || '');
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      Alert.alert('Error', 'Failed to load profile data');
-    } finally {
-      setLoading(false);
+      setSelectedImages(existingImages);
     }
+    
+    // Load work and education from userData
+    setWork({ jobTitle: user.career || '', company: user.company || '' });
+    setEducation(user.education || '');
+    setGoal(user.goal || '');
+    setCareer(user.career || '');
+    setHeight(user.height || '');
+    setKids(user.kids || '');
+    setZodiac(user.zodiac || '');
+    setPersonality(user.personality || '');
+    setReligon(user.religon || '');
+    setLanguages(user.languages || []);
+    setInterests(user.interests || []);
+    setLifestyle(user.lifestyle || []);
+    setBio(user.bio || '');
+    setLocation(user.location || '');
   };
 
   useEffect(() => {
-    fetchUserProfile();
-  }, []);
+    if (initialized && !authLoading) {
+      loadUserData();
+      setLoading(false);
+    }
+  }, [user, initialized, authLoading]);
 
   // Listen for navigation params (work, education)
   useEffect(() => {
@@ -90,6 +98,43 @@ const EditProfile = (props) => {
       }
       if (props.route.params.education) {
         setEducation(props.route.params.education);
+      }
+      if (props.route.params.goal) {
+        setGoal(props.route.params.goal);
+      }
+      if (props.route.params.career) {
+        setCareer(props.route.params.career);
+        setWork(prev => ({ ...prev, jobTitle: props.route.params.career }));
+      }
+      if (props.route.params.height) {
+        setHeight(props.route.params.height);
+      }
+      if (props.route.params.kids) {
+        setKids(props.route.params.kids);
+      }
+      if (props.route.params.zodiac) {
+        setZodiac(props.route.params.zodiac);
+      }
+      if (props.route.params.personality) {
+        setPersonality(props.route.params.personality);
+      }
+      if (props.route.params.religon) {
+        setReligon(props.route.params.religon);
+      }
+      if (props.route.params.languages) {
+        setLanguages(props.route.params.languages);
+      }
+      if (props.route.params.interests) {
+        setInterests(props.route.params.interests);
+      }
+      if (props.route.params.lifestyle) {
+        setLifestyle(props.route.params.lifestyle);
+      }
+      if (props.route.params.bio) {
+        setBio(props.route.params.bio);
+      }
+      if (props.route.params.location) {
+        setLocation(props.route.params.location);
       }
     }
   }, [props.route && props.route.params]);
@@ -108,8 +153,14 @@ const EditProfile = (props) => {
   };
 
   const handleImageSelection = async (index) => {
+    if (imagePickerActive) return; // Prevent double launch
+    setImagePickerActive(true);
+
     const permissionGranted = await requestPermissions();
-    if (!permissionGranted) return;
+    if (!permissionGranted) {
+      setImagePickerActive(false);
+      return;
+    }
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -126,6 +177,8 @@ const EditProfile = (props) => {
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to pick image');
+    } finally {
+      setImagePickerActive(false);
     }
   };
 
@@ -148,45 +201,122 @@ const EditProfile = (props) => {
       const validImages = selectedImages.filter(img => img !== null);
       const userId = user?._id;
       let s3Urls = [];
-      for (const img of validImages) {
-        if (img && img.uri && !img.uri.startsWith('http')) { // Only upload new images
-          const formData = new FormData();
-          formData.append('Profilepictures', {
-            uri: img.uri,
-            name: img.fileName || `photo.jpg`,
-            type: img.type || 'image/jpeg',
-          });
-          formData.append('userId', userId);
-          const uploadRes = await axios.post(`${API_BASE_URL}/upload`, formData, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'multipart/form-data',
-            },
-          });
-          if (uploadRes.data && uploadRes.data.url) {
-            s3Urls.push(uploadRes.data.url);
-          }
-        } else if (img && img.uri && img.uri.startsWith('http')) {
-          s3Urls.push(img.uri);
-        }
-      }
-      // Update user profile with new S3 URLs and other fields
-      const updateData = {
-        profilePictures: s3Urls,
-        career: work.jobTitle,
-        company: work.company,
-        education: education,
-      };
-      console.log('Update data being sent:', updateData);
-      const response = await axios.put(`${API_BASE_URL}/auth/update`, updateData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      console.log('API_BASE_URL:', API_BASE_URL);
+      console.log('Valid images to upload:', validImages);
+
+      // Build ordered list of final URLs matching the selectedImages grid
+      // Step 1: collect indices of images that need upload (local URIs)
+      const indicesNeedingUpload = [];
+      const existingHttpUrls = new Map();
+      selectedImages.forEach((img, idx) => {
+        if (!img) return;
+        if (img.uri && img.uri.startsWith('http')) {
+          existingHttpUrls.set(idx, img.uri);
+        } else if (img.uri) {
+          indicesNeedingUpload.push(idx);
         }
       });
-      Alert.alert('Success', 'Profile updated successfully!');
-      await fetchUserProfile();
-      navigation.navigate('Profile');
+
+      // Step 2: bulk upload all local images (if any)
+      let uploadedUrlsOrdered = [];
+      if (indicesNeedingUpload.length > 0) {
+        const formData = new FormData();
+        // Append in index order so server returns in same order
+        indicesNeedingUpload.forEach((idx, order) => {
+          const img = selectedImages[idx];
+          let uploadUri = img.uri;
+          if (!uploadUri.startsWith('file://')) uploadUri = 'file://' + uploadUri;
+          const extMatch = (img.fileName || uploadUri).match(/\.([a-zA-Z0-9]+)$/);
+          const ext = extMatch ? extMatch[1] : 'jpg';
+          const mimeType = img.mimeType || (ext === 'png' ? 'image/png' : 'image/jpeg');
+          const name = img.fileName || `photo_${idx}.${ext}`;
+          formData.append('images', { uri: uploadUri, name, type: mimeType });
+        });
+
+        // Abort if server takes too long
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        try {
+          const res = await fetch(`${API_BASE_URL}/upload-images-optimized`, {
+            method: 'POST',
+            body: formData,
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          const text = await res.text();
+          if (!res.ok) {
+            throw new Error(`Bulk upload failed: ${res.status} ${text}`);
+          }
+          const data = JSON.parse(text);
+          if (!data.success || !Array.isArray(data.imageUrls)) {
+            throw new Error('Bulk upload did not return imageUrls');
+          }
+          uploadedUrlsOrdered = data.imageUrls;
+          if (uploadedUrlsOrdered.length !== indicesNeedingUpload.length) {
+            console.warn('Some images may have failed to upload:', { expected: indicesNeedingUpload.length, got: uploadedUrlsOrdered.length });
+          }
+        } catch (err) {
+          console.log('Bulk upload error:', err);
+          Alert.alert('Upload Error', 'Failed to upload photos. Please try again.');
+          return;
+        }
+      }
+
+      // Step 3: assemble final URLs in grid order
+      s3Urls = selectedImages
+        .map((img, idx) => {
+          if (!img) return null;
+          if (existingHttpUrls.has(idx)) return existingHttpUrls.get(idx);
+          // Map uploaded URL by the relative order in indicesNeedingUpload
+          if (indicesNeedingUpload.length > 0) {
+            const order = indicesNeedingUpload.indexOf(idx);
+            if (order !== -1 && order < uploadedUrlsOrdered.length) {
+              return uploadedUrlsOrdered[order];
+            }
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      console.log('All uploaded image URLs (in order):', s3Urls);
+
+      // Update user profile with new URLs and other fields
+      const updateData = {
+        profilePictures: s3Urls,
+        career: career || work.jobTitle,
+        company: work.company,
+        education: education,
+        goal: goal,
+        height: height,
+        kids: kids,
+        zodiac: zodiac,
+        personality: personality,
+        religon: religon,
+        languages: languages,
+        interests: interests,
+        lifestyle: lifestyle,
+        bio: bio,
+        location: location,
+      };
+      console.log('Update data being sent:', updateData);
+      try {
+        const response = await axios.put(`${API_BASE_URL}/auth/update`, updateData, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('Profile update response:', response.data);
+        
+        // Update AuthContext with the new user data
+        updateUser(response.data);
+        
+        navigation.navigate('ProfileScreen');
+      } catch (profileUpdateError) {
+        console.log('Profile update error:', profileUpdateError);
+        Alert.alert('Error', profileUpdateError.response?.data?.error || 'Failed to update profile');
+      }
     } catch (error) {
       console.error('Error updating profile:', error);
       console.log('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
@@ -197,10 +327,10 @@ const EditProfile = (props) => {
   };
 
   // Show loading state
-  if (loading) {
+  if (!initialized || authLoading || loading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#fff', fontSize: 16 }}>Loading profile...</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }]}> 
+        <ActivityIndicator size="large" color="#EC066A" />
       </View>
     );
   }
@@ -210,8 +340,8 @@ const EditProfile = (props) => {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: '#fff', fontSize: 16 }}>Failed to load profile</Text>
-        <TouchableOpacity onPress={fetchUserProfile} style={{ marginTop: 10, padding: 10, backgroundColor: '#EC066A', borderRadius: 8 }}>
-          <Text style={{ color: '#fff' }}>Retry</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Login')} style={{ marginTop: 10, padding: 10, backgroundColor: '#EC066A', borderRadius: 8 }}>
+          <Text style={{ color: '#fff' }}>Login</Text>
         </TouchableOpacity>
       </View>
     );
@@ -236,13 +366,13 @@ const EditProfile = (props) => {
               <TouchableOpacity
                 key={index}
                 style={onboardingStyles.photoUploadBox}
-                onPress={image ? null : () => handleImageSelection(index)}
+                onPress={image || updating || imagePickerActive ? null : () => handleImageSelection(index)}
                 activeOpacity={image ? 1 : 0.7}
               >
                 {image ? (
                   <View style={onboardingStyles.imageContainer}>
                     <Image
-                      source={{ uri: image.uri }}
+                      source={image.uri && image.uri.startsWith('http') ? getImageSource(image.uri) : { uri: image.uri }}
                       style={onboardingStyles.uploadedImage}
                     />
                     <TouchableOpacity
@@ -286,23 +416,23 @@ const EditProfile = (props) => {
         {/* Bio */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Bio</Text>
-          <TouchableOpacity style={styles.sectionRow}>
-            <Text style={styles.placeholderText}>{user.bio || 'Add bio'}</Text>
+          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Bio', { bio: bio || user.bio || '' })}>
+            <Text style={styles.placeholderText}>{bio || user.bio || 'Add bio'}</Text>
           </TouchableOpacity>
         </View>
         {/* Relationship goals */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Relationship goals</Text>
           <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('RelationshipGoals')}>
-            <Text style={styles.placeholderText}>{user.goal || 'Add your goal'}</Text>
+            <Text style={styles.placeholderText}>{goal || user.goal || 'Add your goal'}</Text>
             <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
           </TouchableOpacity>
         </View>
         {/* Work */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Work</Text>
-          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Work')}>
-            <Text style={styles.placeholderText}>{work.jobTitle || user.career || 'Add your work'}</Text>
+          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Career')}>
+            <Text style={styles.placeholderText}>{career || work.jobTitle || user.career || 'Add your work'}</Text>
             <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
           </TouchableOpacity>
         </View>
@@ -321,37 +451,37 @@ const EditProfile = (props) => {
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Height')}>
               <Image source={require('../../assets/ruler.png')} style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Height</Text>
-              <Text style={styles.moreAboutValue}>{user.height || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{height || user.height || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Kids')}>
               <Image source={require('../../assets/kids.png')} style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Kids</Text>
-              <Text style={styles.moreAboutValue}>{user.kids || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{kids || user.kids || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Zodiac')}>
               <Image source={require('../../assets/zodiac.png')} style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Zodiac sign</Text>
-              <Text style={styles.moreAboutValue}>{user.zodiac || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{zodiac || user.zodiac || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Education')}>
               <Image source={require('../../assets/graduation.png')} style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Educational level</Text>
-              <Text style={styles.moreAboutValue}>{user.education || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{education || user.education || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Personality')}>
               <FontAwesome6 name="user-astronaut" size={18} color="#fff" style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Personality</Text>
-              <Text style={styles.moreAboutValue}>{user.personality || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{personality || user.personality || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Religion')}>
               <MaterialIcons name="church" size={20} color="#fff" style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Religion</Text>
-              <Text style={styles.moreAboutValue}>{user.religon || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{religon || user.religon || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Career')}>
@@ -370,7 +500,7 @@ const EditProfile = (props) => {
           </View>
           <View style={styles.chipContainer}>
             {user.interests && user.interests.length > 0 ? (
-              user.interests.map((interest, idx) => (
+              (interests && interests.length > 0 ? interests : user.interests).map((interest, idx) => (
                 <View key={idx} style={styles.chip}><Text style={styles.chipText}>{interest}</Text></View>
               ))
             ) : (
@@ -386,8 +516,8 @@ const EditProfile = (props) => {
           </View>
           <View style={styles.chipContainer}>
             {user.lifestyle && user.lifestyle.length > 0 ? (
-              user.lifestyle.map((lifestyle, idx) => (
-                <View key={idx} style={styles.chip}><Text style={styles.chipText}>{lifestyle}</Text></View>
+              (lifestyle && lifestyle.length > 0 ? lifestyle : user.lifestyle).map((item, idx) => (
+                <View key={idx} style={styles.chip}><Text style={styles.chipText}>{item}</Text></View>
               ))
             ) : (
               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', padding: 20 }}>No lifestyle choices added</Text>
@@ -397,17 +527,17 @@ const EditProfile = (props) => {
         {/* Languages */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Languages</Text>
-          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Language')}>
-            <Text style={styles.placeholderText}>Add languages</Text>
+          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Language', { languages: languages })}>
+            <Text style={styles.placeholderText}>{(languages && languages.length > 0) ? languages.join(', ') : 'Add languages'}</Text>
             <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.5)" />
           </TouchableOpacity>
         </View>
         {/* Location */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Location</Text>
-          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Language')}>
-            <Text style={styles.locationText}>{user.location || 'Location not set'}</Text>
-           </TouchableOpacity>
+          <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Location', { location: location || user.location || '' })}>
+            <Text style={styles.locationText}>{location || user.location || 'Location not set'}</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
         {/* Apply Button */}

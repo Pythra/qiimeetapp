@@ -57,14 +57,24 @@ const SignInScreen = ({ navigation }) => {
           Alert.alert('Error', 'Phone number not found. Please check your number or sign up.');
           return;
         }
-        // Bypass OTP sending for testing
-        navigation.navigate('Auth', {
-          screen: 'VerificationCode',
-          params: { phoneNumber, pinId: 'dummy-pin-id', fromSignIn: true },
-        });
+        // If exists, send OTP
+        const otpResult = await sendOTP(phoneNumber);
+        if (otpResult.pinId) {
+          await AsyncStorage.setItem('pinId', otpResult.pinId);
+          
+          // Use the processed phone number from the backend response if available
+          const phoneNumberToUse = otpResult.phoneNumber || phoneNumber;
+          
+          navigation.navigate('Auth', {
+            screen: 'VerificationCode',
+            params: { phoneNumber: phoneNumberToUse, pinId: otpResult.pinId, fromSignIn: true },
+          });
+        } else {
+          Alert.alert('Error', otpResult.message || 'Failed to send OTP');
+        }
       } catch (err) {
-        console.log('Sign in error:', err);
-        Alert.alert('Error', 'Failed to sign in');
+        console.log('OTP send error:', err);
+        Alert.alert('Error', 'Failed to send OTP');
       }
     }
   };

@@ -20,7 +20,16 @@ const Help = ({ navigation }) => {
             key={option.label}
             style={[styles.optionRow, idx !== 0 && { marginTop: 16 }]}
             activeOpacity={1}
-            onPress={option.label === 'FAQs' ? () => navigation.navigate('FAQs') : undefined}
+            onPress={
+              option.label === 'FAQs' 
+                ? () => navigation.navigate('FAQs') 
+                : option.label === 'Support'
+                ? () => navigation.navigate('ReportDetails', {
+                    reason: 'Support Request',
+                    reportType: 'Report'
+                  })
+                : undefined
+            }
           >
             <Text style={styles.optionLabel}>{option.label}</Text>
             <MaterialIcons name="keyboard-arrow-right" size={28} color="#888" />

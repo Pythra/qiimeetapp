@@ -7,13 +7,13 @@ import {
   Dimensions, 
   TouchableOpacity, 
   Image,
-  FlatList,
   StatusBar,
   ActivityIndicator,
   Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Asset } from 'expo-asset';
+import Carousel from 'react-native-reanimated-carousel';
 import CustomButton from '../../constants/button';
 import ScreenWrapper from '../../components/ScreenWrapper';
 
@@ -32,7 +32,6 @@ const IntroSlides = ({ navigation, onReady }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imagesLoaded, setImagesLoaded] = useState({});
   const [allImagesLoaded, setAllImagesLoaded] = useState(false);
-  const flatListRef = useRef(null);
   
   const data = [
     {
@@ -106,66 +105,57 @@ const IntroSlides = ({ navigation, onReady }) => {
           )}
           
           <LinearGradient
-            colors={['rgba(0,0,0,0)', '#121212']}
+            colors={['rgba(0,0,0,0)', '#121212', '#121212']}
+            locations={[0.65, 0.88, 0.95]}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
             style={styles.gradient}
           />
         </View>
-        {/* Removed textContainer with title and subtitle */}
       </View>
     );
-  };
-
-  const handleScroll = (event) => {
-    const contentOffsetX = event.nativeEvent.contentOffset.x;
-    const index = Math.round(contentOffsetX / width);
-    if (index !== currentIndex) {
-      setCurrentIndex(index);
-    }
-  };
-
-  const goToSlide = (index) => {
-    if (flatListRef.current) {
-      flatListRef.current.scrollToIndex({ index, animated: true });
-    }
   };
 
   const handleGetStarted = () => {
     navigation.replace('Landing');
   };
 
-  // If fonts aren't loaded, show loading indicator
+  // If images aren't loaded, show loading indicator with dark background
   if (!allImagesLoaded) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#C40CF2" />
+        <StatusBar barStyle="light-content" backgroundColor="#121212" />
+        <ActivityIndicator size="large" color="#ff2d7a" />
+        <Text style={{ 
+          color: '#fff', 
+          marginTop: 16, 
+          fontSize: 16,
+          fontFamily: FONTS.regular
+        }}>
+          Loading...
+        </Text>
       </View>
     );
   }
 
   return ( 
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle="light-content" backgroundColor="#121212" />
         
-        <FlatList
-          ref={flatListRef}
+        <Carousel
+          loop={true}
+          width={width}
+          height={height * 0.7}
           data={data}
           renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onScroll={handleScroll}
-          initialScrollIndex={0}
-          getItemLayout={(_, index) => ({
-            length: width,
-            offset: width * index,
-            index,
-          })}
-          initialNumToRender={3}
-          maxToRenderPerBatch={3}
-          windowSize={3}
+          scrollEnabled={true}
+          autoPlay={true}
+          autoplayInterval={4000}
+          scrollAnimationDuration={800}
+          onProgressChange={(_, absoluteProgress) => {
+            setCurrentIndex(Math.round(absoluteProgress) % data.length);
+          }}
+          style={styles.carousel}
         />
         
         {/* New vertical stack for text, indicator, and button */}
@@ -174,17 +164,13 @@ const IntroSlides = ({ navigation, onReady }) => {
           <Text style={styles.subtitle}>{data[currentIndex].subtitle}</Text>
           <View style={styles.pagination}>
             {data.map((_, index) => (
-              <TouchableOpacity
+              <View
                 key={index}
-                onPress={() => goToSlide(index)}
-              >
-                <View
-                  style={[
-                    styles.dot,
-                    currentIndex === index && styles.activeDot,
-                  ]}
-                />
-              </TouchableOpacity>
+                style={[
+                  styles.dot,
+                  currentIndex === index && styles.activeDot,
+                ]}
+              />
             ))}
           </View>
           <CustomButton
@@ -202,6 +188,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212', 
     paddingTop: 44,
   },
+  carousel: {
+    paddingTop: 30,
+  },
   slide: {
     width: width,
     alignItems: 'center',
@@ -210,7 +199,7 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: width * 0.87, 
-    height: height * 0.55,
+    height: height * 0.65,
     borderRadius: 8,
     overflow: 'hidden',
     marginBottom: 24,
@@ -219,6 +208,7 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
   },
   loaderContainer: {
     position: 'absolute',
@@ -234,9 +224,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+    top: 0,
     bottom: 0,
-    height: 150,
     width: '100%',
+    height: '100%',
   },
   textContainer: {
     flex: 1,
@@ -247,11 +238,11 @@ const styles = StyleSheet.create({
   },
   verticalStack: {
     position: 'absolute',
-    bottom: 28,  
+    bottom: 0,  
     alignItems: 'center',
     width: width * 0.87,
     alignSelf: 'center',
-    gap: 20, // Even vertical spacing between title, subtitle, indicator, and button
+    gap: 24, // Slightly reduced spacing to fit better with taller images
   },
   title: {
     fontSize: 30,
@@ -281,11 +272,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', 
     borderRadius: 4,
     marginHorizontal: 4,
+    transition: 'all 0.3s ease',
   },
   activeDot: {
     width: 24,
     backgroundColor: '#fff',
     opacity: 1,
+    transition: 'all 0.3s ease',
   }
 });
 

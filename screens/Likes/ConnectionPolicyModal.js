@@ -9,23 +9,17 @@ import notificationService from '../../utils/notificationService';
 const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'request', targetUserId, onConnectionLimit }) => {
   const [isChecked, setIsChecked] = useState(false);
 
-  console.log('Modal render, targetUserId:', targetUserId, 'visible:', visible);
+
 
   const handleAccept = async () => {
-    console.log('handleAccept called, isChecked:', isChecked, 'targetUserId:', targetUserId);
     if (isChecked && targetUserId) {
-      console.log('handleAccept called');
       try {
         const token = await AsyncStorage.getItem('token');
-        console.log('Token:', token);
-        console.log('Target User ID:', targetUserId);
-        
-        // Ensure notification token is up to date
-        if (notificationService.token) {
-          await notificationService.saveTokenToServer(notificationService.token);
+        let url = `${API_BASE_URL}/auth/add-requester`;
+        if (modalType === 'accept') {
+          url = `${API_BASE_URL}/auth/accept-connection`;
         }
-        
-        const res = await fetch(`${API_BASE_URL}/auth/add-requester`, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -33,26 +27,18 @@ const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'reques
           },
           body: JSON.stringify({ targetUserId }),
         });
-        console.log('Response status:', res.status);
         const resData = await res.json().catch(() => ({}));
-        console.log('Response data:', resData);
-        
         if (res.ok) {
           onAccept();
         } else if (res.status === 403 && resData.code === 'NO_CONNECTIONS') {
-          // Handle connection limit reached: just close the modal, do not show the limit modal
-          console.log('Connection limit reached:', resData);
           onClose();
-          // Optionally show a toast/snackbar here
         } else {
-          console.log('Failed to add requester:', resData);
           // Optionally show error
         }
       } catch (err) {
-        console.log('Error in handleAccept:', err);
         // Optionally show error
       }
-      setIsChecked(false); // Reset checkbox when modal closes
+      setIsChecked(false);
     }
   };
 
@@ -83,7 +69,7 @@ const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'reques
       transparent={true}
       animationType="fade"
       statusBarTranslucent={true}
-      onShow={() => console.log('ConnectionPolicyModal is visible')}
+      onShow={() => {}}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
@@ -100,7 +86,6 @@ const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'reques
                 style={[styles.checkbox, isChecked && styles.checkedBox]}
                 onPress={() => {
                   setIsChecked(!isChecked);
-                  console.log('Checkbox toggled:', !isChecked);
                 }}
               >
                 {isChecked && <MaterialIcons name="check" size={16} color="#fff" />}
@@ -111,7 +96,6 @@ const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'reques
             <TouchableOpacity 
               style={[styles.connectButton, isChecked && styles.activeConnectButton]}
               onPress={() => {
-                console.log('Connect button pressed');
                 handleAccept();
               }}
               disabled={!isChecked}
@@ -211,8 +195,7 @@ const styles = StyleSheet.create({
   connectButtonText: {
     color: '#666',
     fontSize: 24,
-    fontWeight: '600',
-    fontFamily: FONTS?.medium || 'System',
+    fontWeight: '700', 
   },
   activeConnectButtonText: {
     color: '#fff',

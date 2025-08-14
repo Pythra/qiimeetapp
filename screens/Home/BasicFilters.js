@@ -1,60 +1,181 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
 import CustomButton from '../../constants/button';
+import Colors from '../../constants/Colors';
 import Slider from '@react-native-community/slider';
 import VerifiedInfoModal from './VerifiedInfoModal';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import Feather from 'react-native-vector-icons/Feather';
+import { useAuth } from '../../components/AuthContext';
+import { API_BASE_URL } from '../../env';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BasicFilters = ({ navigation }) => {
+const BasicFilters = ({ navigation, route }) => {
+  const { user: currentUser, token } = useAuth();
   const [activeTab, setActiveTab] = useState('basic');
   const [ageRange, setAgeRange] = useState([18, 99]);
   const [heightRange, setHeightRange] = useState([140, 220]);
-  const [isAgeCustomized, setIsAgeCustomized] = useState(false);
+  // Age slider always visible; remove customization toggle
   const [isHeightCustomized, setIsHeightCustomized] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [showNearbyOptions, setShowNearbyOptions] = useState(false);
   const [showOthers, setShowOthers] = useState(false);
   const [showVerifiedInfo, setShowVerifiedInfo] = useState(false);
   const [showSimilarInterests, setShowSimilarInterests] = useState(false);
+  const [loading, setLoading] = useState(false);
+  
+  // Filter state
+  const [location, setLocation] = useState('All');
+  const [languages, setLanguages] = useState([]);
+  const [relationshipType, setRelationshipType] = useState('All');
+  const [lifestyleChoices, setLifestyleChoices] = useState([]);
+  const [educationLevel, setEducationLevel] = useState('All');
+  const [zodiacSign, setZodiacSign] = useState('All');
+  const [familyPlan, setFamilyPlan] = useState('All');
+  const [personality, setPersonality] = useState('All');
+  const [religion, setReligion] = useState('All');
+
+  // Load saved filter settings on component mount
+  useEffect(() => {
+    loadFilterSettings();
+    
+    // Add navigation listener to track navigation events
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      console.log('🧭 Navigation event: beforeRemove');
+      console.log('📋 Current route params:', route?.params);
+    });
+    
+    return unsubscribe;
+  }, [navigation, route?.params]);
+
+  const loadFilterSettings = async () => {
+    try {
+      // Load both filter settings and active filters
+      const [savedFilters, activeFilters] = await Promise.all([
+        AsyncStorage.getItem('filterSettings'),
+        AsyncStorage.getItem('activeFilters')
+      ]);
+      
+      if (savedFilters) {
+        const filters = JSON.parse(savedFilters);
+        console.log('Loading saved filter settings:', filters);
+        
+        // Apply saved settings
+        if (filters.ageRange) {
+          setAgeRange(filters.ageRange);
+        }
+        if (filters.heightRange) {
+          setHeightRange(filters.heightRange);
+          setIsHeightCustomized(filters.isHeightCustomized || false);
+        }
+        if (filters.location) setLocation(filters.location);
+        if (filters.languages) setLanguages(filters.languages);
+        if (filters.isVerified !== undefined) setIsVerified(filters.isVerified);
+        if (filters.showNearbyOptions !== undefined) setShowNearbyOptions(filters.showNearbyOptions);
+        if (filters.showOthers !== undefined) setShowOthers(filters.showOthers);
+        if (filters.showSimilarInterests !== undefined) setShowSimilarInterests(filters.showSimilarInterests);
+        if (filters.relationshipType) setRelationshipType(filters.relationshipType);
+        if (filters.lifestyleChoices) setLifestyleChoices(filters.lifestyleChoices);
+        if (filters.educationLevel) setEducationLevel(filters.educationLevel);
+        if (filters.zodiacSign) setZodiacSign(filters.zodiacSign);
+        if (filters.familyPlan) setFamilyPlan(filters.familyPlan);
+        if (filters.personality) setPersonality(filters.personality);
+        if (filters.religion) setReligion(filters.religion);
+        if (filters.activeTab) setActiveTab(filters.activeTab);
+      }
+      
+      if (activeFilters) {
+        const filters = JSON.parse(activeFilters);
+        console.log('Loading active filters:', filters);
+        
+        // Apply active filter values
+        if (filters.ageRange) {
+          setAgeRange(filters.ageRange);
+        }
+        if (filters.heightRange) {
+          setHeightRange(filters.heightRange);
+          setIsHeightCustomized(true);
+        }
+        if (filters.location) setLocation(filters.location);
+        if (filters.languages) setLanguages(filters.languages);
+        if (filters.verifiedOnly !== undefined) setIsVerified(filters.verifiedOnly);
+        if (filters.showNearbyOptions !== undefined) setShowNearbyOptions(filters.showNearbyOptions);
+        if (filters.showOthers !== undefined) setShowOthers(filters.showOthers);
+        if (filters.similarInterests !== undefined) setShowSimilarInterests(filters.similarInterests);
+        if (filters.relationshipType) setRelationshipType(filters.relationshipType);
+        if (filters.lifestyleChoices) setLifestyleChoices(filters.lifestyleChoices);
+        if (filters.educationLevel) setEducationLevel(filters.educationLevel);
+        if (filters.zodiacSign) setZodiacSign(filters.zodiacSign);
+        if (filters.familyPlan) setFamilyPlan(filters.familyPlan);
+        if (filters.personality) setPersonality(filters.personality);
+        if (filters.religion) setReligion(filters.religion);
+      }
+    } catch (error) {
+      console.error('Error loading filter settings:', error);
+    }
+  };
+
+  const saveFilterSettings = async () => {
+    try {
+      const filterSettings = {
+        ageRange,
+        heightRange,
+        isHeightCustomized,
+        location,
+        languages,
+        isVerified,
+        showNearbyOptions,
+        showOthers,
+        showSimilarInterests,
+        relationshipType,
+        lifestyleChoices,
+        educationLevel,
+        zodiacSign,
+        familyPlan,
+        personality,
+        religion,
+        activeTab
+      };
+      
+      await AsyncStorage.setItem('filterSettings', JSON.stringify(filterSettings));
+      console.log('Filter settings saved:', filterSettings);
+    } catch (error) {
+      console.error('Error saving filter settings:', error);
+    }
+  };
 
   const renderBasicTab = () => (
-    <>
-      <Text style={styles.sectionTitle}>Age Range</Text>
-      <View style={[styles.section, styles.sliderSection]}>
-        <View style={styles.sliderContainer}>
-          <MultiSlider
-            values={ageRange}
-            min={18}
-            max={75}
-            step={1}
-            onValuesChange={(values) => {
-              setAgeRange(values);
-              setIsAgeCustomized(true);
-            }}
-            selectedStyle={{ backgroundColor: '#ec066a' }}
-            unselectedStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.5)' }}
-            sliderLength={280}
-            markerStyle={styles.marker}
-            containerStyle={styles.sliderInnerContainer}
-          />
+    <View>
+      <View style={styles.section}>
+        <View style={styles.verifiedTitleContainer}>
+          <Text style={[styles.sectionTitle, styles.verifiedTitle]}>Age Range</Text>
         </View>
-        <Text style={styles.menuValue}>
-          {isAgeCustomized 
-            ? `Between ${ageRange[0]} to ${ageRange[1]}`
-            : 'Between 18 and 75'}
-        </Text>
-        <View style={styles.switchContainer}>
-          <Text style={styles.switchText}>Show nearby options when out</Text>
-          <Switch
-            value={showNearbyOptions}
-            onValueChange={setShowNearbyOptions}
-            trackColor={{ false: '#333', true: '#ec066a' }}
-            thumbColor={showNearbyOptions ? '#000' : 'rgba(225, 225, 225, 0.5)'}
-            style={styles.smallSwitch}
-          />
+        <View style={styles.sliderSection}>
+          <Text style={styles.ageValue}>
+            {ageRange[0]} - {ageRange[1]} years
+          </Text>
+          <View style={styles.sliderContainer}>
+            <MultiSlider
+              values={ageRange}
+              onValuesChange={setAgeRange}
+              min={18}
+              max={99}
+              step={1}
+              sliderLength={280}
+              selectedStyle={{ backgroundColor: '#ec066a' }}
+              unselectedStyle={{ backgroundColor: '#333' }}
+              containerStyle={{ height: 40 }}
+              trackStyle={{ height: 4, borderRadius: 2 }}
+              markerStyle={{ height: 20, width: 20, borderRadius: 10, backgroundColor: '#ec066a' }}
+              onValuesChangeFinish={(values) => {
+                console.log('🎂 Age range changed to:', values);
+                setAgeRange(values);
+              }}
+            />
+          </View>
         </View>
       </View>
 
@@ -65,7 +186,7 @@ const BasicFilters = ({ navigation }) => {
           onPress={() => navigation.navigate('LocationFilter')}
         > 
           <View style={styles.menuItemContent}>
-            <Text style={styles.menuValue}>Nigeria</Text>
+            <Text style={styles.menuValue}>{location !== 'All' ? location : 'Nigeria'}</Text>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
         </TouchableOpacity>
@@ -78,7 +199,9 @@ const BasicFilters = ({ navigation }) => {
           onPress={() => navigation.navigate('LanguageFilter')}
         > 
           <View style={styles.menuItemContent}>
-            <Text style={styles.menuValue}>Select languages</Text>
+            <Text style={styles.menuValue}>
+          {languages.length > 0 ? languages.join(', ') : 'Select languages'}
+        </Text>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
         </TouchableOpacity>
@@ -94,16 +217,17 @@ const BasicFilters = ({ navigation }) => {
       <View style={styles.section}>
         <View style={styles.verifiedSection}>
           <Text style={styles.menuValue}>Show verified profiles only</Text>
-          <Switch
-            value={isVerified}
-            onValueChange={setIsVerified}
-            trackColor={{ false: '#333', true: '#ec066a' }}
-            thumbColor={isVerified ? '#000' : 'rgba(225, 225, 225, 0.5)'}
-            style={styles.smallSwitch}
-          />
+          <TouchableOpacity onPress={() => setIsVerified(!isVerified)} activeOpacity={0.7}>
+            <MaterialCommunityIcons
+              name={isVerified ? 'toggle-switch' : 'toggle-switch-off-outline'}
+              size={30}
+              color={isVerified ? Colors.primaryDark : '#888'}
+              style={{ marginRight: 2 }}
+            />
+          </TouchableOpacity>
         </View>
       </View>
-    </>
+    </View>
   );
 
   const renderAdvancedTab = () => (
@@ -134,13 +258,14 @@ const BasicFilters = ({ navigation }) => {
         </View>
         <View style={styles.switchContainer}>
           <Text style={styles.switchText}>Show me other people if I run out</Text>
-          <Switch
-            value={showOthers}
-            onValueChange={setShowOthers}
-            trackColor={{ false: '#333', true: '#ec066a' }}
-            thumbColor={showOthers ? '#000' : 'rgba(225, 225, 225, 0.5)'}
-            style={styles.smallSwitch}
-          />
+          <TouchableOpacity onPress={() => setShowOthers(!showOthers)} activeOpacity={0.7}>
+            <MaterialCommunityIcons
+              name={showOthers ? 'toggle-switch' : 'toggle-switch-off-outline'}
+              size={30}
+              color={showOthers ? Colors.primaryDark : '#888'}
+              style={{ marginRight: 2 }}
+            />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -152,7 +277,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>All</Text>
+              <Text style={styles.menuValue}>{relationshipType !== 'All' ? relationshipType : 'All'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -164,13 +289,14 @@ const BasicFilters = ({ navigation }) => {
       <View style={styles.section}>
         <View style={styles.menuItemContent}>
           <Text style={styles.menuValue}>Show people with similar interests</Text>
-          <Switch
-            value={showSimilarInterests}
-            onValueChange={setShowSimilarInterests}
-            trackColor={{ false: '#333', true: '#ec066a' }}
-            thumbColor={showSimilarInterests ? '#000' : 'rgba(225, 225, 225, 0.5)'}
-            style={styles.smallSwitch}
-          />
+          <TouchableOpacity onPress={() => setShowSimilarInterests(!showSimilarInterests)} activeOpacity={0.7}>
+            <MaterialCommunityIcons
+              name={showSimilarInterests ? 'toggle-switch' : 'toggle-switch-off-outline'}
+              size={30}
+              color={showSimilarInterests ? Colors.primaryDark : '#888'}
+              style={{ marginRight: 2 }}
+            />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -181,9 +307,11 @@ const BasicFilters = ({ navigation }) => {
         onPress={() => navigation.navigate('LifestyleChoices')}
       >
         <View style={styles.menuItemContent}>
-          <View> 
-            <Text style={styles.menuValue}>Select lifestyle preferences</Text>
-          </View>
+                      <View> 
+              <Text style={styles.menuValue}>
+                {lifestyleChoices.length > 0 ? lifestyleChoices.join(', ') : 'Select lifestyle preferences'}
+              </Text>
+            </View>
           <Feather name="chevron-right" size={24} color="#666" />
         </View>
       </TouchableOpacity>
@@ -197,7 +325,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>Select education level</Text>
+              <Text style={styles.menuValue}>{educationLevel !== 'All' ? educationLevel : 'Select education level'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -213,7 +341,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>Select zodiac sign</Text>
+              <Text style={styles.menuValue}>{zodiacSign !== 'All' ? zodiacSign : 'Select zodiac sign'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -228,7 +356,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>Select family preferences</Text>
+              <Text style={styles.menuValue}>{familyPlan !== 'All' ? familyPlan : 'Select family preferences'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -243,7 +371,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>Select personality</Text>
+              <Text style={styles.menuValue}>{personality !== 'All' ? personality : 'Select personality'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -258,7 +386,7 @@ const BasicFilters = ({ navigation }) => {
         >
           <View style={styles.menuItemContent}>
             <View> 
-              <Text style={styles.menuValue}>Select religion</Text>
+              <Text style={styles.menuValue}>{religion !== 'All' ? religion : 'Select religion'}</Text>
             </View>
             <Feather name="chevron-right" size={24} color="#666" />
           </View>
@@ -266,6 +394,183 @@ const BasicFilters = ({ navigation }) => {
       </View>
     </>
   );
+
+  // Function to reset all filters
+  const handleResetFilters = async () => {
+    setAgeRange([18, 99]);
+    setHeightRange([140, 220]);
+    setIsHeightCustomized(false);
+    setIsVerified(false);
+    setShowNearbyOptions(false);
+    setShowOthers(false);
+    setShowSimilarInterests(false);
+    setLocation('All');
+    setLanguages([]);
+    setRelationshipType('All');
+    setLifestyleChoices([]);
+    setEducationLevel('All');
+    setZodiacSign('All');
+    setFamilyPlan('All');
+    setPersonality('All');
+    setReligion('All');
+    
+    // Clear saved filter settings
+    try {
+      await AsyncStorage.removeItem('filterSettings');
+      await AsyncStorage.removeItem('activeFilters');
+      console.log('Filter settings cleared');
+    } catch (error) {
+      console.error('Error clearing filter settings:', error);
+    }
+  };
+
+  // Function to apply filters and fetch filtered users
+  const handleApplyFilters = async () => {
+    setLoading(true);
+    
+    try {
+      console.log('🎯 === APPLYING FILTERS START ===');
+      console.log('👤 Current user ID:', currentUser._id);
+      console.log('🔧 Filter settings:', {
+        ageRange,
+        heightRange: isHeightCustomized ? heightRange : 'Not customized',
+        location: location !== 'All' ? location : 'All locations',
+        languages: languages.length > 0 ? languages : 'No languages selected',
+        verifiedOnly: isVerified,
+        showNearbyOptions,
+        showOthers,
+        similarInterests: showSimilarInterests,
+        relationshipType: relationshipType !== 'All' ? relationshipType : 'All types',
+        lifestyleChoices: lifestyleChoices.length > 0 ? lifestyleChoices : 'No choices selected',
+        educationLevel: educationLevel !== 'All' ? educationLevel : 'All levels',
+        zodiacSign: zodiacSign !== 'All' ? zodiacSign : 'All signs',
+        familyPlan: familyPlan !== 'All' ? familyPlan : 'All plans',
+        personality: personality !== 'All' ? personality : 'All personalities',
+        religion: religion !== 'All' ? religion : 'All religions'
+      });
+      
+      // Save filter settings before applying
+      await saveFilterSettings();
+      
+      // Also save to AsyncStorage for persistence
+      const filterSettings = {
+        ageRange,
+        heightRange: isHeightCustomized ? heightRange : null,
+        location: location !== 'All' ? location : null,
+        languages: languages.length > 0 ? languages : null,
+        verifiedOnly: isVerified,
+        showNearbyOptions,
+        showOthers,
+        similarInterests: showSimilarInterests,
+        relationshipType: relationshipType !== 'All' ? relationshipType : null,
+        lifestyleChoices: lifestyleChoices.length > 0 ? lifestyleChoices : null,
+        educationLevel: educationLevel !== 'All' ? educationLevel : null,
+        zodiacSign: zodiacSign !== 'All' ? zodiacSign : null,
+        familyPlan: familyPlan !== 'All' ? familyPlan : null,
+        personality: personality !== 'All' ? personality : null,
+        religion: religion !== 'All' ? religion : null
+      };
+      
+      await AsyncStorage.setItem('activeFilters', JSON.stringify(filterSettings));
+      
+      const filterData = {
+        userId: currentUser._id,
+        ageRange,
+        heightRange: isHeightCustomized ? heightRange : null,
+        location: location !== 'All' ? location : null,
+        languages: languages.length > 0 ? languages : null,
+        verifiedOnly: isVerified,
+        showNearbyOptions,
+        showOthers,
+        similarInterests: showSimilarInterests,
+        relationshipType: relationshipType !== 'All' ? relationshipType : null,
+        lifestyleChoices: lifestyleChoices.length > 0 ? lifestyleChoices : null,
+        educationLevel: educationLevel !== 'All' ? educationLevel : null,
+        zodiacSign: zodiacSign !== 'All' ? zodiacSign : null,
+        familyPlan: familyPlan !== 'All' ? familyPlan : null,
+        personality: personality !== 'All' ? personality : null,
+        religion: religion !== 'All' ? religion : null
+      };
+
+      console.log('📤 Sending filter data to backend:', filterData);
+      console.log('🌐 API endpoint:', `${API_BASE_URL}/admin/users/home/filtered`);
+
+      const response = await fetch(`${API_BASE_URL}/admin/users/home/filtered`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(filterData)
+      });
+
+      console.log('📥 Response status:', response.status);
+      console.log('📥 Response ok:', response.ok);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const responseText = await response.text();
+      console.log('📥 Raw response text:', responseText);
+      
+      let data;
+      try {
+        data = JSON.parse(responseText);
+        console.log('📥 Parsed response data:', data);
+      } catch (parseError) {
+        console.error('❌ Failed to parse response:', responseText);
+        throw new Error('Invalid JSON response from server');
+      }
+
+      if (data.success) {
+        console.log('✅ Filtered users received:', data.users?.length || 0, 'users');
+        
+        if (data.users && data.users.length > 0) {
+          console.log('📋 First few filtered users:');
+          data.users.slice(0, 3).forEach((user, index) => {
+            console.log(`${index + 1}. ${user.name || user.username} - Age: ${user.age}, Location: ${user.location}`);
+          });
+        }
+        
+        // Store filtered users in navigation params to pass to Home screen
+        console.log('🧭 Navigating to HomeScreen with filtered data');
+        navigation.navigate('HomeScreen', {
+          filteredUsers: data.users || [],
+          filtersApplied: true,
+          filters: {
+            ageRange,
+            heightRange: isHeightCustomized ? heightRange : null,
+            location: location !== 'All' ? location : null,
+            languages: languages.length > 0 ? languages : null,
+            verifiedOnly: isVerified,
+            showNearbyOptions,
+            showOthers,
+            similarInterests: showSimilarInterests,
+            relationshipType: relationshipType !== 'All' ? relationshipType : null,
+            lifestyleChoices: lifestyleChoices.length > 0 ? lifestyleChoices : null,
+            educationLevel: educationLevel !== 'All' ? educationLevel : null,
+            zodiacSign: zodiacSign !== 'All' ? zodiacSign : null,
+            familyPlan: familyPlan !== 'All' ? familyPlan : null,
+            personality: personality !== 'All' ? personality : null,
+            religion: religion !== 'All' ? religion : null
+          }
+        });
+        
+        console.log('✅ Navigation completed successfully');
+      } else {
+        console.error('❌ Filter application failed:', data.error);
+        Alert.alert('Error', data.error || 'Failed to apply filters');
+      }
+      
+      console.log('🎯 === APPLYING FILTERS END ===');
+    } catch (error) {
+      console.error('❌ Error applying filters:', error);
+      Alert.alert('Error', 'Failed to apply filters. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -286,6 +591,8 @@ const BasicFilters = ({ navigation }) => {
             <Text style={[styles.tabText, activeTab === 'advanced' && styles.activeTabText]}>Advanced</Text>
           </TouchableOpacity>
         </View>
+        
+        {/* Active filters indicator removed */}
       </View>
 
       <ScrollView style={styles.content}>
@@ -298,9 +605,20 @@ const BasicFilters = ({ navigation }) => {
       />
 
       <View style={styles.footer}>
-        <CustomButton title="Apply" 
-        onPress={() => navigation.navigate('HomeScreen')}
-        />
+        <View style={styles.buttonRow}>
+          <CustomButton 
+            title={loading ? "Applying..." : "Apply"} 
+            onPress={handleApplyFilters}
+            disabled={loading}
+            style={styles.applyButton}
+          />
+        </View>
+        <TouchableOpacity 
+          style={styles.resetTextContainer}
+          onPress={handleResetFilters}
+        >
+          <Text style={styles.resetText}>Reset Filters</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -440,12 +758,41 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     fontFamily: FONTS.regular,
   },
-  footer: {
-    padding: 20,
-    paddingBottom: 32,
+     footer: {
+     padding: 20,
+     paddingBottom: 32,
+   },
+   buttonRow: {
+     width: '100%',
+   },
+  applyButton: {
+    width: '100%',
   },
   smallSwitch: {
     transform: [{ scaleX: 0.5 }, { scaleY: 0.5 }],
+  },
+  resetTextContainer: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  resetText: {
+    color: '#ec066a',
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+  },
+  activeFiltersIndicator: {
+    backgroundColor: '#ec066a',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignSelf: 'center',
+    marginTop: 8,
+  },
+  activeFiltersText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: FONTS.regular,
   },
 });
 

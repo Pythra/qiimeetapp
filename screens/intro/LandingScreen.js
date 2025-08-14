@@ -33,9 +33,9 @@ const LandingScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="auto"
-        backgroundColor="transparent"
-        translucent={true} />
+      <StatusBar barStyle="light-content"
+        backgroundColor="#121212"
+        translucent={false} />
       
       {/* Background Image */}
       <ImageBackground 
@@ -128,6 +128,7 @@ const LandingScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#121212', // Add dark background to prevent white flash
   },
   backgroundImage: {
     flex: 1,
