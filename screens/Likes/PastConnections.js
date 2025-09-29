@@ -6,17 +6,20 @@ import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
 import { MaterialIcons } from '@expo/vector-icons';
 import ConnectionPolicyModal from './ConnectionPolicyModal';
+import ProfilePopupModal from '../../components/ProfilePopupModal';
 import { useAuth } from '../../components/AuthContext';
 import { API_BASE_URL } from '../../env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PastConnections = ({ navigation }) => {
-  const { user: currentUser, allUsers, updateUser, getProfileImageSource } = useAuth();
+  const { user: currentUser, allUsers, updateUser, getProfileImageSource, getImageSource } = useAuth();
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [policyModalVisible, setPolicyModalVisible] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [pastConnections, setPastConnections] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedProfileUser, setSelectedProfileUser] = useState(null);
 
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -116,6 +119,17 @@ const PastConnections = ({ navigation }) => {
     setPolicyModalVisible(true);
   };
 
+  // Profile popup modal handlers
+  const openProfileModal = (user) => {
+    setSelectedProfileUser(user);
+    setProfileModalVisible(true);
+  };
+
+  const closeProfileModal = () => {
+    setSelectedProfileUser(null);
+    setProfileModalVisible(false);
+  };
+
   return (
     <View style={styles.container}>
       <TopHeader 
@@ -136,14 +150,16 @@ const PastConnections = ({ navigation }) => {
         {pastConnections.length > 0 ? (
           pastConnections.map((connection) => (
             <View key={connection._id} style={styles.connectionCard}>
-              <Image source={getProfileImageSource(connection)} style={styles.userImage} />
+              <TouchableOpacity onPress={() => openProfileModal(connection)}>
+                <Image source={getProfileImageSource(connection)} style={styles.userImage} />
+              </TouchableOpacity>
               <View style={styles.userInfo}>
                 <View style={styles.nameContainer}>
                   <Text style={styles.userName}>
                     {connection.username || connection.name || connection.phone || 'User'}
                     {connection.age || calculateAge(connection.dateOfBirth) ? `, ${connection.age || calculateAge(connection.dateOfBirth)}` : ''}
                   </Text>
-                  {connection.verificationStatus === 'true' && (
+                  {(connection.verificationStatus === 'verified') && (
                     <MaterialIcons name="verified" size={16} color="#EC066A" style={styles.verifiedIcon} />
                   )}
                 </View>
@@ -218,6 +234,16 @@ const PastConnections = ({ navigation }) => {
           setPolicyModalVisible(false);
           navigation.navigate('AcceptedConnection');
         }}
+      />
+
+      {/* Profile Popup Modal */}
+      <ProfilePopupModal
+        visible={profileModalVisible}
+        onClose={closeProfileModal}
+        user={selectedProfileUser}
+        getProfileImageSource={getProfileImageSource}
+        getImageSource={getImageSource}
+        calculateAge={calculateAge}
       />
     </View>
   );

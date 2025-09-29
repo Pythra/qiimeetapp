@@ -14,6 +14,7 @@ import {
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
 import SocketManager from '../../utils/socket';
+import CallSwitchManager from '../../utils/callSwitchManager';
 import { sendCallEventMessage } from './components/ChatFunctions';
 
 // Agora configuration
@@ -104,62 +105,56 @@ const MinimizedCallModal = ({ visible, onClose, onMaximize, onEndCall, contactNa
     return `${m}:${s}`;
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent={true}
+    <Animated.View 
+      pointerEvents="box-none"
+      style={{ 
+        position: 'absolute',
+        top: 24,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        transform: [{ translateY: slideAnim }]
+      }}
     >
-      <Animated.View 
-        pointerEvents="box-none"
-        style={{ 
-          position: 'absolute',
-          top: 24,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
-          transform: [{ translateY: slideAnim }]
-        }}
-      >
-        <View pointerEvents="auto" style={styles.minimizedCallContainer}>
-          <View style={styles.minimizedCallContent}>
-            {/* Call Info */}
-            <View style={styles.minimizedCallInfo}>
-              <View style={styles.minimizedCallIndicator}>
-                <Ionicons 
-                  name={callType === 'video' ? 'videocam' : 'call'} 
-                  size={16} 
-                  color="#4CAF50" 
-                />
-              </View>
-              <View style={styles.minimizedCallText}>
-                <Text style={styles.minimizedContactName}>{contactName}</Text>
-                <Text style={styles.minimizedDuration}>{formatTime(duration)}</Text>
-              </View>
+      <View pointerEvents="auto" style={styles.minimizedCallContainer}>
+        <View style={styles.minimizedCallContent}>
+          {/* Call Info */}
+          <View style={styles.minimizedCallInfo}>
+            <View style={styles.minimizedCallIndicator}>
+              <Ionicons 
+                name={callType === 'video' ? 'videocam' : 'call'} 
+                size={16} 
+                color="#4CAF50" 
+              />
             </View>
-            
-            {/* Action Buttons */}
-            <View style={styles.minimizedCallActions}>
-              <TouchableOpacity 
-                style={styles.minimizedActionButton}
-                onPress={onMaximize}
-              >
-                <MaterialCommunityIcons name="arrow-expand" size={18} color="#fff" />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.minimizedActionButton, styles.minimizedEndButton]}
-                onPress={onEndCall}
-              >
-                <MaterialIcons name="call-end" size={18} color="#fff" />
-              </TouchableOpacity>
+            <View style={styles.minimizedCallText}>
+              <Text style={styles.minimizedContactName}>{contactName}</Text>
+              <Text style={styles.minimizedDuration}>{formatTime(duration)}</Text>
             </View>
           </View>
+          
+          {/* Action Buttons */}
+          <View style={styles.minimizedCallActions}>
+            <TouchableOpacity 
+              style={styles.minimizedActionButton}
+              onPress={onMaximize}
+            >
+              <MaterialCommunityIcons name="arrow-expand" size={18} color="#fff" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.minimizedActionButton, styles.minimizedEndButton]}
+              onPress={onEndCall}
+            >
+              <MaterialIcons name="call-end" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
-      </Animated.View>
-    </Modal>
+      </View>
+    </Animated.View>
   );
 };
 
@@ -167,21 +162,33 @@ const MinimizedCallModal = ({ visible, onClose, onMaximize, onEndCall, contactNa
 const activeCall = { channelName: null, timestamp: null };
 
 const VoiceCall = ({ navigation, route }) => {
-  console.log('VoiceCall screen loaded!');
-  console.log('Route params:', route?.params);
   
   // Extract channel name early for validation
   const channelName = route?.params?.channelName;
+  
+  // Log switching information
+  if (route?.params?.isSwitchingFromVideo) {
+    console.log('📞 Switching from video call with preserved state:', {
+      callState: route.params.preservedCallState,
+      talkingSeconds: route.params.preservedTalkingSeconds,
+      isJoined: route.params.preservedIsJoined
+    });
+  }
   
   // Prevent multiple instances of the same call
   useEffect(() => {
     if (channelName) {
       const now = Date.now();
-      if (activeCall.channelName === channelName && activeCall.timestamp && (now - activeCall.timestamp) < 5000) {
+      const isSwitching = route?.params?.isSwitchingFromVideo || route?.params?.isSwitchingFromVoice;
+      
+      // Don't treat switching as duplicate calls
+      if (!isSwitching && activeCall.channelName === channelName && activeCall.timestamp && (now - activeCall.timestamp) < 5000) {
         console.log('⚠️ Duplicate call detected, going back to prevent multiple instances');
         navigation.goBack();
         return;
       }
+      
+      // Update active call tracking
       activeCall.channelName = channelName;
       activeCall.timestamp = now;
     }
@@ -193,12 +200,69 @@ const VoiceCall = ({ navigation, route }) => {
         activeCall.timestamp = null;
       }
     };
-  }, [channelName, navigation]);
+  }, [channelName, navigation, route?.params?.isSwitchingFromVideo, route?.params?.isSwitchingFromVoice]);
   
   // UI States
   const [callState, setCallState] = useState('calling'); // calling, ringing, talking
   const [talkingSeconds, setTalkingSeconds] = useState(0);
   const timerRef = useRef(null);
+  
+  // Check if this is a switch from video call
+  const isSwitchingFromVideo = route?.params?.isSwitchingFromVideo || false;
+  const preservedCallState = route?.params?.preservedCallState;
+  const preservedTalkingSeconds = route?.params?.preservedTalkingSeconds || 0;
+  
+  // State to track if we're switching to video call
+  const [isSwitchingToVideo, setIsSwitchingToVideo] = useState(false);
+  const preservedIsJoined = route?.params?.preservedIsJoined || false;
+  const hasInitializedFromVideo = useRef(false);
+  
+  // Function to start the call timer
+  const startCallTimer = (preservedSeconds = null) => {
+    console.log('📞 Starting call timer from preserved state');
+    console.log('📞 Current timer state:', { 
+      hasTimer: !!timerRef.current, 
+      callState, 
+      talkingSeconds,
+      isJoined,
+      preservedSeconds
+    });
+    
+    if (timerRef.current) {
+      console.log('📞 Clearing existing timer before starting new one');
+      clearInterval(timerRef.current);
+    }
+    
+    // Use preserved seconds if provided, otherwise use current state
+    const startFrom = preservedSeconds !== null ? preservedSeconds : talkingSeconds;
+    
+    timerRef.current = setInterval(() => {
+      setTalkingSeconds((s) => s + 1);
+    }, 1000);
+    
+    console.log('📞 Timer started successfully from:', startFrom);
+  };
+  
+  // Initialize call state from preserved values if switching from video
+  useEffect(() => {
+    if (isSwitchingFromVideo && preservedCallState) {
+      console.log('📞 Restoring preserved call state from video call:', {
+        callState: preservedCallState,
+        talkingSeconds: preservedTalkingSeconds,
+        isJoined: preservedIsJoined
+      });
+      
+      setCallState(preservedCallState);
+      setTalkingSeconds(preservedTalkingSeconds);
+      setIsJoined(preservedIsJoined); // Also restore the joined state
+      
+      // If we were already in a call, start the timer immediately
+      if (preservedCallState === 'talking') {
+        console.log('📞 Restarting call timer from preserved state');
+        startCallTimer(preservedTalkingSeconds);
+      }
+    }
+  }, [isSwitchingFromVideo, preservedCallState, preservedTalkingSeconds, preservedIsJoined]);
   
   // Agora States
   const agoraEngineRef = useRef();
@@ -226,13 +290,11 @@ const VoiceCall = ({ navigation, route }) => {
 
   // Validate required parameters
   useEffect(() => {
-    console.log('Validating VoiceCall parameters...');
-    console.log('channelName:', channelName);
-    console.log('localUid:', localUid);
-    console.log('contactName:', contactName);
-    console.log('chatId:', chatId);
-    console.log('currentUser:', currentUser?.username || currentUser?.name || 'Unknown');
-    console.log('otherUserId:', otherUserId);
+    console.log('Validating VoiceCall parameters:', {
+      channelName, localUid, contactName, chatId, 
+      currentUser: currentUser?.username || currentUser?.name || 'Unknown', 
+      otherUserId
+    });
 
     if (!channelName) {
       console.error('❌ Missing required parameter: channelName');
@@ -258,8 +320,7 @@ const VoiceCall = ({ navigation, route }) => {
 
     try {
       setIsLoadingToken(true);
-      console.log('🔑 Fetching Agora token from backend...');
-      console.log('🔑 Parameters:', { channelName, localUid });
+      console.log('🔑 Fetching Agora token:', { channelName, localUid });
       
       const response = await axios.get(`${API_BASE_URL}/agora/token`, {
         params: {
@@ -299,16 +360,14 @@ const VoiceCall = ({ navigation, route }) => {
           return;
         }
 
-        console.log('🚀 Initializing call with channel:', channelName);
+        console.log('🚀 Initializing call:', { channel: channelName, hasToken: !!providedToken });
 
         // Check if token is already provided (for incoming calls)
         if (providedToken) {
-          console.log('✅ Using provided Agora token');
           setToken(providedToken);
           setIsLoadingToken(false);
         } else {
           // Fetch token for outgoing calls
-          console.log('🔑 Fetching token for outgoing call...');
           await fetchAgoraToken();
         }
       } catch (error) {
@@ -335,10 +394,19 @@ const VoiceCall = ({ navigation, route }) => {
     if (token && !isJoined && channelName) {
       const setupAndJoin = async () => {
         try {
-          console.log('🔧 Setting up Agora engine and joining call...');
-          await setupVoiceSDKEngine();
-          setupEventHandler();
-          await joinCall();
+          if (isSwitchingFromVideo && preservedIsJoined) {
+            // When switching from video, we're continuing an existing call
+            console.log('🔧 Setting up voice engine for call continuation...');
+            await setupVoiceSDKEngine();
+            setupEventHandler();
+            await joinCall();
+          } else {
+            // Normal setup for new voice calls
+            console.log('🔧 Setting up Agora engine...');
+            await setupVoiceSDKEngine();
+            setupEventHandler();
+            await joinCall();
+          }
         } catch (error) {
           console.error('❌ Error during setup and join:', error);
           Alert.alert('Call Setup Error', 'Failed to setup call. Please try again.');
@@ -352,11 +420,17 @@ const VoiceCall = ({ navigation, route }) => {
         navigation.goBack();
       });
     }
-  }, [token, channelName]);
+  }, [token, channelName, isSwitchingFromVideo, preservedIsJoined]);
 
   // Handle call state transitions and timer
   useEffect(() => {
     let timeout1, timeout2;
+    
+    // Don't start new timers if we're switching from video call
+    if (isSwitchingFromVideo) {
+      console.log('📞 Skipping timer setup - switching from video call');
+      return;
+    }
     
     if (callState === 'calling') {
       timeout1 = setTimeout(() => {
@@ -383,7 +457,7 @@ const VoiceCall = ({ navigation, route }) => {
       clearTimeout(timeout2);
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [callState, isJoined, remoteUid]);
+  }, [callState, isJoined, remoteUid, isSwitchingFromVideo]);
 
   // Update call state when remote user joins
   useEffect(() => {
@@ -411,7 +485,29 @@ const VoiceCall = ({ navigation, route }) => {
 
     const handleCallResponse = (data) => {
       console.log('📞 Received call response:', data);
+      console.log('📞 Current switching states:', { isSwitchingFromVideo, isSwitchingToVideo });
+      console.log('📞 Global switching state:', CallSwitchManager.isSwitching(channelName));
+      
       if (data && data.channelName === channelName) {
+        // Check global switching state first
+        if (CallSwitchManager.isSwitching(channelName)) {
+          console.log('📞 Ignoring call response - channel is switching globally');
+          return;
+        }
+        
+        // Ignore call response events if we're switching calls
+        if (isSwitchingFromVideo || isSwitchingToVideo) {
+          console.log('📞 Ignoring call response during call switch');
+          return;
+        }
+        
+        // Additional check: if this is a call response with "ended" and we just switched from video,
+        // it might be a leftover event from the video call ending
+        if (data.response === 'ended' && data.reason === 'caller_ended' && route?.params?.isSwitchingFromVideo) {
+          console.log('📞 Ignoring call ended response from video call switch');
+          return;
+        }
+        
         if (data.response === 'declined') {
           setDeclinedModalVisible(true);
         } else if (data.response === 'ended') {
@@ -424,7 +520,7 @@ const VoiceCall = ({ navigation, route }) => {
     return () => {
       SocketManager.onCallResponse(() => {}); // Remove listener
     };
-  }, [channelName]);
+  }, [channelName, isSwitchingFromVideo, isSwitchingToVideo]);
 
   useEffect(() => {
     // Listen for call type switch events
@@ -433,6 +529,12 @@ const VoiceCall = ({ navigation, route }) => {
     const handleCallTypeSwitch = (data) => {
       console.log('📞 Received call type switch:', data);
       if (data && data.channelName === channelName) {
+        // Set global switching state on the receiving device
+        if (data.newCallType === 'video') {
+          console.log('📞 Setting global switching state for incoming video switch');
+          CallSwitchManager.setSwitching(channelName, true, 'voice-to-video');
+        }
+        
         if (data.isVideoToggle) {
           // Handle video toggle from the other user
           const shouldEnableVideo = data.newCallType === 'video';
@@ -452,7 +554,17 @@ const VoiceCall = ({ navigation, route }) => {
               currentUser: currentUser,
               otherUserId: otherUserId,
               callType: 'video',
+              // Preserve call state for smooth switching
+              preservedCallState: callState,
+              preservedTalkingSeconds: talkingSeconds,
+              preservedIsJoined: isJoined,
+              isSwitchingFromVoice: true // Flag to indicate this is a switch from voice, not a new call
             });
+            
+            // Clear global switching state after successful navigation
+            setTimeout(() => {
+              CallSwitchManager.clearSwitching(channelName);
+            }, 1000);
           }
         }
       }
@@ -461,7 +573,22 @@ const VoiceCall = ({ navigation, route }) => {
     return () => {
       SocketManager.onCallTypeSwitched(() => {}); // Remove listener
     };
-  }, [channelName, token, localUid, contactName, contactImage, chatId, currentUser, otherUserId, navigation]);
+  }, [channelName, token, localUid, contactName, contactImage, chatId, currentUser, otherUserId, navigation, callState, talkingSeconds, isJoined]);
+
+  // Cleanup effect to ensure timer is cleared on unmount
+  useEffect(() => {
+    return () => {
+      console.log('📞 VoiceCall component unmounting, cleaning up timer...');
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      // Clear global switching state if this component is unmounting
+      if (channelName) {
+        CallSwitchManager.clearSwitching(channelName);
+      }
+    };
+  }, [channelName]);
 
   const handleDeclinedModalClose = () => {
     setDeclinedModalVisible(false);
@@ -470,10 +597,14 @@ const VoiceCall = ({ navigation, route }) => {
 
   const handleMinimize = () => {
     setIsMinimized(true);
+    // Navigate back to the previous screen so user can interact with the app
+    navigation.goBack();
   };
 
   const handleMaximize = () => {
     setIsMinimized(false);
+    // Navigate back to VoiceCall screen
+    navigation.navigate('VoiceCall', route.params);
   };
 
   const handleMinimizedEndCall = () => {
@@ -519,6 +650,16 @@ const VoiceCall = ({ navigation, route }) => {
   const switchToVideoCall = async () => {
     try {
       if (!channelName) return;
+      
+      console.log('📞 Starting switch to video call...');
+      
+      // Set global switching state FIRST
+      CallSwitchManager.setSwitching(channelName, true, 'voice-to-video');
+      
+      // Set flag FIRST to prevent endCall during switch
+      setIsSwitchingToVideo(true);
+      console.log('📞 Set isSwitchingToVideo flag to true');
+      
       // Notify the other user to switch screens
       if (otherUserId) {
         SocketManager.emitCallTypeSwitch({
@@ -529,6 +670,7 @@ const VoiceCall = ({ navigation, route }) => {
           isVideoToggle: false
         });
       }
+      
       // Navigate to full VideoCall with same parameters
       navigation.replace('VideoCall', {
         channelName: channelName,
@@ -540,9 +682,21 @@ const VoiceCall = ({ navigation, route }) => {
         currentUser: currentUser,
         otherUserId: otherUserId,
         callType: 'video',
+        // Preserve call state for smooth switching
+        preservedCallState: callState,
+        preservedTalkingSeconds: talkingSeconds,
+        preservedIsJoined: isJoined,
+        isSwitchingFromVoice: true // Flag to indicate this is a switch from voice, not a new call
       });
+      
+      // Clear global switching state after successful navigation
+      setTimeout(() => {
+        CallSwitchManager.clearSwitching(channelName);
+      }, 1000);
     } catch (error) {
       console.error('Error switching to video call:', error);
+      setIsSwitchingToVideo(false); // Reset flag on error
+      CallSwitchManager.clearSwitching(channelName); // Clear global state on error
     }
   };
 
@@ -639,6 +793,12 @@ const VoiceCall = ({ navigation, route }) => {
     try {
       console.log('📞 Ending call...');
       
+      // Skip ending the call if we're switching to video mode
+      if (isSwitchingToVideo) {
+        console.log('📞 Skipping call end notification - switching to video mode');
+        return;
+      }
+      
       // Notify the other user that the call has ended
       if (otherUserId && channelName) {
         console.log('📞 Notifying other user that call has ended');
@@ -656,8 +816,8 @@ const VoiceCall = ({ navigation, route }) => {
       setIsJoined(false);
       setCallState('calling');
       
-      // Send call ended event message if we have the required parameters
-      if (chatId && currentUser && otherUserId && callType) {
+      // Send call ended event message if we have the required parameters (skip if switching to video)
+      if (!isSwitchingToVideo && chatId && currentUser && otherUserId && callType) {
         console.log('📞 Sending call ended event message');
         sendCallEventMessage({
           chatId,

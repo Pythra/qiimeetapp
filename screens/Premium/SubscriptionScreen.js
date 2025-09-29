@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
@@ -14,6 +14,8 @@ import backArrow from '../../assets/backarrow.png';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
+import { useAuth } from '../../components/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = 217;
@@ -22,18 +24,21 @@ const CARD_MARGIN = 16;
 const subscriptionOptions = [
   {
     title: 'Monthly',
+    type: 'monthly',
     price: '₦2,500',
     originalPrice: '₦3,000',
     description: ' Access premium features with a flexible monthly plan.',
   },
   {
     title: 'Quarterly',
+    type: 'quarterly',
     price: '₦6,000',
     originalPrice: '₦7,500',
     description: 'Get 3 months of premium access at a better rate. ',
   },
   {
     title: 'Annually',
+    type: 'yearly',
     price: '₦15,000',
     originalPrice: '₦18,000',
     description: 'Enjoy a full year of all Qiimeets premium features.',
@@ -74,37 +79,31 @@ const stepContents = [
 ];
 
 const SubscriptionScreen = ({ navigation }) => {
+  const { user: currentUser, updateUser, refreshUser, balance: userBalance, refreshBalance } = useAuth();
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState(0);
-  const [userBalance, setUserBalance] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [insufficientBalanceModalVisible, setInsufficientBalanceModalVisible] = useState(false);
   const [requiredAmount, setRequiredAmount] = useState(0);
   const subscriptionOptionsRef = useRef(null);
 
-  // Fetch user balance on mount
-  React.useEffect(() => {
-    const fetchBalance = async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) return;
-        const response = await axios.get(`${API_BASE_URL}/transaction/balance/current`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (response.data.success) {
-          setUserBalance(response.data.balance);
-        }
-      } catch (error) {
-        setUserBalance(0);
-      } finally {
-        setLoading(false);
+  // Only refresh user data if it's stale (older than 30 seconds)
+  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  
+  useFocusEffect(
+    useCallback(() => {
+      const now = Date.now();
+      const shouldRefresh = !currentUser || (now - lastRefreshTime > 30000); // 30 seconds
+      
+      if (shouldRefresh) {
+        setLastRefreshTime(now);
+        refreshUser();
       }
-    };
-    fetchBalance();
-  }, []);
+      
+      // Always refresh balance when screen comes into focus
+      refreshBalance();
+    }, [currentUser, lastRefreshTime, refreshUser, refreshBalance])
+  );
 
   const handleOptionPress = (idx) => {
     setSelectedOption(idx);
@@ -126,10 +125,14 @@ const SubscriptionScreen = ({ navigation }) => {
         alert('No authentication token found');
         return;
       }
-      // Call backend to deduct balance and create transaction
+      // Call backend to process subscription payment
       const response = await axios.post(
-        `${API_BASE_URL}/transaction/deduct`,
-        { amount: price, planTitle: selectedPlan.title },
+        `${API_BASE_URL}/transaction/subscribe`,
+        { 
+          userId: currentUser._id,
+          subscriptionType: selectedPlan.type || 'monthly',
+          amount: price 
+        },
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -138,8 +141,16 @@ const SubscriptionScreen = ({ navigation }) => {
         }
       );
       if (response.data.success) {
-        // Optionally update local balance
-        setUserBalance(response.data.balance);
+        // Update AuthContext with the updated user data from backend response
+        const updatedUserData = {
+          ...currentUser,
+          balance: response.data.user.balance,
+          isSubscribed: response.data.user.isSubscribed,
+          subscriptionExpiryDate: response.data.user.subscriptionExpiryDate,
+          subscriptionType: response.data.user.subscriptionType
+        };
+        updateUser(updatedUserData);
+        
         // Navigate to PremiumScreen and show success
         navigation.navigate('PremiumScreen', {
           amountPaid: price,
@@ -148,14 +159,9 @@ const SubscriptionScreen = ({ navigation }) => {
         });
       }
     } catch (error) {
-      // Silently handle errors since deductions work correctly
-      console.log('Transaction completed, navigating to PremiumScreen');
-      // Navigate to PremiumScreen even if there's an error response
-      navigation.navigate('PremiumScreen', {
-        amountPaid: price,
-        fromSubscription: true,
-        planTitle: selectedPlan.title,
-      });
+      console.error('Subscription payment error:', error.response?.data || error.message);
+      // Show error message to user
+      alert('Failed to process subscription payment. Please try again.');
     }
   };
 
@@ -167,7 +173,7 @@ const SubscriptionScreen = ({ navigation }) => {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => navigation.navigate('PremiumScreen')} style={styles.backButton}>
           <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
           <Text style={styles.headerTitle}>Get Premium</Text>
         </TouchableOpacity>
@@ -262,16 +268,20 @@ const SubscriptionScreen = ({ navigation }) => {
       {renderHeader()}
       {renderAnimatedCarousel()}
       {renderSubscriptionOptions()}
-      <Text style={styles.disclaimer}>
-        {disclaimerTexts[selectedOption].split('Terms.')[0]}
-        <Text style={styles.termsText}>Terms.</Text>
-      </Text>
-      <TouchableOpacity
-        style={styles.continueButton}
-        onPress={handleContinue}
-      >
-        <Text style={styles.continueButtonText}>Continue</Text>
-      </TouchableOpacity>
+      
+      {/* Bottom section with button and disclaimer */}
+      <View style={styles.bottomSection}>
+        <TouchableOpacity
+          style={styles.continueButton}
+          onPress={handleContinue}
+        >
+          <Text style={styles.continueButtonText}>Continue</Text>
+        </TouchableOpacity>
+        <Text style={styles.disclaimer}>
+          {disclaimerTexts[selectedOption].split('Terms.')[0]}
+          <Text style={styles.termsText}>Terms.</Text>
+        </Text>
+      </View>
       
       <InsufficientBalanceModal 
         visible={insufficientBalanceModalVisible}
@@ -288,7 +298,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingTop: 40
+    paddingTop: 16
   },
   header: {
     flexDirection: 'row', 
@@ -325,7 +335,7 @@ const styles = StyleSheet.create({
   carouselContainer: {
     height: 280,
     marginBottom: 8,
-    marginTop: -24,
+    marginTop: -8,
   },
   stepContainer: {
     flex: 1,
@@ -446,9 +456,9 @@ const styles = StyleSheet.create({
   continueButton: {
     backgroundColor: '#ec066a',
     marginHorizontal: 24,
-    bottom: 56,
+    marginBottom: 16,
     width: '90%',
-    position: 'absolute', 
+    alignSelf: 'center',
     paddingVertical: 16,
     borderRadius: 90,
     alignItems: 'center',
@@ -459,13 +469,19 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontWeight: '700',
   },
+  bottomSection: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    backgroundColor: '#121212', 
+  },
   disclaimer: {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     fontFamily: FONTS.regular,
     textAlign: 'center', 
     lineHeight: 18,
-    marginTop: 16,
     marginHorizontal: 24,
   },
   termsText: {

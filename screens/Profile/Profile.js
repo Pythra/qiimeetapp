@@ -272,7 +272,7 @@ const ProfileScreen = ({ navigation, route }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>My Bio</Text>
           <Text style={styles.bioText}>
-            {user.bio || 'Warm-hearted, adventurous, and always up for a good laugh. Let\'s create something meaningful!'}
+            {user.bio || 'Bio not set'}
           </Text>
         </View>
 

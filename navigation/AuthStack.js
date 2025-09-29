@@ -4,7 +4,7 @@ import WelcomeScreen from '../screens/intro/WelcomeScreen';
 import OnboardingStack from './OnboardingStack';
 import LandingScreen from '../screens/intro/LandingScreen';
 import SignInScreen from '../screens/intro/forms/SignInScreen';
-import Signup from '../screens/intro/signup';
+import Signup from '../screens/intro/signup/Index';
 import VerificationCodeScreen from '../screens/intro/forms/VerificationCodeScreen';
 const Stack = createStackNavigator();
 

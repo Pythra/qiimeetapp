@@ -26,7 +26,7 @@ const Help = ({ navigation }) => {
                 : option.label === 'Support'
                 ? () => navigation.navigate('ReportDetails', {
                     reason: 'Support Request',
-                    reportType: 'Report'
+                    reportType: 'technical_issue'
                   })
                 : undefined
             }

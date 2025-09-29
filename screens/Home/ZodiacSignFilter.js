@@ -78,7 +78,12 @@ const ZodiacSignFilter = ({ navigation }) => {
             selected.length > 0 ? styles.doneButtonActive : styles.doneButtonInactive
           ]}
           activeOpacity={0.8}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            console.log('🔍 [DEBUG] ZodiacSignFilter Done button pressed');
+            console.log('🔍 [DEBUG] selected zodiac signs to pass back:', selected);
+            // Pass the selected zodiac signs back to BasicFilters
+            navigation.navigate('BasicFilters', { selectedZodiacSigns: selected });
+          }}
         >
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>

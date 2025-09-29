@@ -454,20 +454,21 @@ exports.updateLikesDislikes = async (req, res) => {
             console.error('Error sending match notifications:', notifError);
           }
           
-          // Emit match event to both users
+          // Emit match event to both users, but include who triggered the match
           if (io) {
             const matchData = {
               type: 'match_found',
               user1Id: userId.toString(),
               user2Id: likedUserId.toString(),
               user1Name: currentUser.name || currentUser.username,
-              user2Name: likedUser.name || likedUser.username
+              user2Name: likedUser.name || likedUser.username,
+              triggeredBy: userId.toString() // Add this to identify who triggered the match
             };
             
             io.to(`user_${userId}`).emit('match_found', matchData);
             io.to(`user_${likedUserId}`).emit('match_found', matchData);
             
-            console.log('🎉 Match events emitted to both users');
+            console.log('🎉 Match events emitted to both users with triggeredBy info');
           }
         }
       }
@@ -908,24 +909,22 @@ exports.cancelConnection = async (req, res) => {
     await User.findByIdAndUpdate(userId, { $addToSet: { pastConnections: targetUserId } });
     await User.findByIdAndUpdate(targetUserId, { $addToSet: { pastConnections: userId } });
     
-    // Emit real-time updates to both users
-    if (io) {
+    // In Lambda environment, socket server is not available
+    // The frontend will handle real-time updates through data refresh
+    console.log(`✅ [Backend] Connection canceled between ${userId} and ${targetUserId}`);
+    
+    // Optional: Send push notifications instead of socket events
+    try {
+      const notificationService = require('../utils/notificationService');
       const cancelerName = user?.username || user?.name || 'Someone';
-      const targetName = targetUser?.username || targetUser?.name || 'Someone';
       
-      // Notify the target user that connection was canceled
-      io.to(`user_${targetUserId}`).emit('connection_canceled', {
-        type: 'connection_canceled',
-        cancelerId: userId,
-        cancelerName: cancelerName
-      });
+      // Send notification to target user
+      await notificationService.sendConnectionCanceledNotification(targetUserId, cancelerName, userId);
       
-      // Notify the canceler that connection was canceled
-      io.to(`user_${userId}`).emit('connection_canceled', {
-        type: 'connection_canceled',
-        targetId: targetUserId,
-        targetName: targetName
-      });
+      console.log(`📱 [Backend] Connection cancellation notification sent to ${targetUserId}`);
+    } catch (notificationError) {
+      console.error('❌ [Backend] Failed to send cancellation notification:', notificationError);
+      // Don't fail the request if notification fails
     }
     
     res.status(200).json({ message: 'Connection cancelled' });

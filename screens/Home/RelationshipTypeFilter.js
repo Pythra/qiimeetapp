@@ -65,7 +65,10 @@ const RelationshipTypeFilter = ({ navigation }) => {
             selected.length > 0 ? styles.doneButtonActive : styles.doneButtonInactive
           ]}
           activeOpacity={0.8}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            // Pass the selected relationship types back to BasicFilters
+            navigation.navigate('BasicFilters', { selectedRelationshipTypes: selected });
+          }}
         >
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>

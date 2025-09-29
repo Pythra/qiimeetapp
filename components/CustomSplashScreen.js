@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: SCREEN_WIDTH * 0.7, // Increased from 0.5 to 0.7 for bigger logo
+    width: SCREEN_WIDTH * 0.7, // Reverted back to original larger size
     height: SCREEN_WIDTH * 0.7 * 0.21, // Maintain aspect ratio
   },
 });

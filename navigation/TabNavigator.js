@@ -10,6 +10,7 @@ import ChatStack from './ChatStack';
 import ProfileStack from './ProfileStack';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native'; // Add this import
 import { useAuth } from '../components/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Tab = createBottomTabNavigator();
 
@@ -46,10 +47,24 @@ const TabNavigator = () => {
 
   // Simple check to restore auth state if needed
   useEffect(() => {
-    if (dataReady && !token && !user && !loading) {
-      console.log('[TabNavigator] Detected dataReady=true but missing token/user, forcing auth refresh...');
-      forceRefreshAuthState();
-    }
+    const checkAuthState = async () => {
+      if (dataReady && !token && !user && !loading) {
+        // Check if this is a new signup that should go to Welcome screen
+        const isNewSignup = await AsyncStorage.getItem('isNewSignup');
+        
+        if (isNewSignup === 'true') {
+          console.log('[TabNavigator] New signup detected, should not be in MainTabs');
+          // Clear the flag and let the app handle navigation
+          await AsyncStorage.removeItem('isNewSignup');
+          return;
+        }
+        
+        console.log('[TabNavigator] Detected dataReady=true but missing token/user, forcing auth refresh...');
+        forceRefreshAuthState();
+      }
+    };
+    
+    checkAuthState();
   }, [dataReady, token, user, loading, forceRefreshAuthState]);
 
   // Refresh authentication state when MainTabs comes into focus
@@ -57,12 +72,34 @@ const TabNavigator = () => {
     React.useCallback(() => {
       console.log('[TabNavigator] MainTabs focused, refreshing authentication state...');
       
+      // Debug: Check token state before refresh
+      const debugTokenState = async () => {
+        const token = await AsyncStorage.getItem('token');
+        const userId = await AsyncStorage.getItem('userId');
+        console.log('🔍 [TabNavigator] Pre-refresh token state:', {
+          hasToken: !!token,
+          tokenPreview: token ? `${token.substring(0, 20)}...` : 'NO TOKEN',
+          userId: userId || 'NO USER ID',
+          authContextToken: !!token,
+          authContextUser: !!user
+        });
+      };
+      
+      debugTokenState();
+      
       // Force a refresh of the authentication context
       // This will trigger re-renders of all screens with updated user data
       const refreshAuthState = async () => {
         try {
           // Add a small delay to ensure Clerk state is fully established
           await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Debug: Check token state after delay
+          const postDelayToken = await AsyncStorage.getItem('token');
+          console.log('🔍 [TabNavigator] Post-delay token state:', {
+            hasToken: !!postDelayToken,
+            tokenPreview: postDelayToken ? `${postDelayToken.substring(0, 20)}...` : 'NO TOKEN'
+          });
           
           // Force a refresh by triggering a small state change
           // This will cause all child screens to re-render with fresh data
@@ -87,7 +124,6 @@ const TabNavigator = () => {
   );
 
   // ALWAYS show the app - no loading screens, no delays
-  console.log('[TabNavigator] Force show active, displaying app immediately...');
   
   return (
     <Tab.Navigator

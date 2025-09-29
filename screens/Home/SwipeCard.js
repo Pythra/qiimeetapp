@@ -40,7 +40,6 @@ export default function SwipeCard({ user, onSwipeLeft, onSwipeRight, getProfileI
 
   const gestureHandler = useAnimatedGestureHandler({
     onActive: (event) => {
-      console.log('SwipeCard - onActive triggered:', {
         translationX: event.translationX,
         translationY: event.translationY,
         userId: user._id || user.id,
@@ -50,7 +49,6 @@ export default function SwipeCard({ user, onSwipeLeft, onSwipeRight, getProfileI
       translateY.value = event.translationY;
     },
     onEnd: (event) => {
-      console.log('SwipeCard - onEnd triggered:', {
         translationX: event.translationX,
         translationY: event.translationY,
         threshold: SWIPE_THRESHOLD,
@@ -61,27 +59,22 @@ export default function SwipeCard({ user, onSwipeLeft, onSwipeRight, getProfileI
       });
 
       if (event.translationX > SWIPE_THRESHOLD) {
-        console.log('SwipeCard - Swiping RIGHT for user:', user.name);
         // Animate completely off screen first, then call callback
         translateX.value = withTiming(SCREEN_WIDTH * 1.5, { duration: 200 });
         opacity.value = withTiming(0, { duration: 200 }, (finished) => {
           if (finished) {
-            console.log('SwipeCard - Animation complete, calling onSwipeRight for:', user.name);
             runOnJS(onSwipeRight)();
           }
         });
       } else if (event.translationX < -SWIPE_THRESHOLD) {
-        console.log('SwipeCard - Swiping LEFT for user:', user.name);
         // Animate completely off screen first, then call callback
         translateX.value = withTiming(-SCREEN_WIDTH * 1.5, { duration: 200 });
         opacity.value = withTiming(0, { duration: 200 }, (finished) => {
           if (finished) {
-            console.log('SwipeCard - Animation complete, calling onSwipeLeft for:', user.name);
             runOnJS(onSwipeLeft)();
           }
         });
       } else {
-        console.log('SwipeCard - Returning to center for user:', user.name);
         // Return to center
         translateX.value = withSpring(0);
         translateY.value = withSpring(0);

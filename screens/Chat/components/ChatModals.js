@@ -28,7 +28,7 @@ export function CallModal({ visible, onClose, onVoiceCallPress, onVideoCallPress
 }
 
 // Plus Modal
-export function PlusModal({ visible, onClose, onGallerySelect, onAudioSelect, styles }) {
+export function PlusModal({ visible, onClose, onGallerySelect, styles }) {
   return (
     <Modal
       visible={visible}
@@ -45,10 +45,6 @@ export function PlusModal({ visible, onClose, onGallerySelect, onAudioSelect, st
           <TouchableOpacity style={styles.plusModalItem} onPress={onGallerySelect}>
             <Ionicons name="image" size={18} color="rgba(255,255,255,0.5)" style={{ marginRight: 10 }} />
             <Text style={styles.plusModalText}>Gallery</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.plusModalItem} onPress={onAudioSelect}>
-            <Ionicons name="musical-notes" size={18} color="rgba(255,255,255,0.5)" style={{ marginRight: 10 }} />
-            <Text style={styles.plusModalText}>Audio</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>

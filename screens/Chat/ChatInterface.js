@@ -19,6 +19,7 @@ import phoneplusImg from '../../assets/phoneplus.png';
 import waveformImg from '../../assets/waveform.png';
 import blackwave from '../../assets/blackwave.png'; 
 import SocketManager from '../../utils/socket';
+import OnlineStatusService from '../../utils/onlineStatusService';
 import { groupMessagesByTime, handleSend, handleGallerySelect, handleMicPress, markMessageAsRead, markAllMessagesAsRead, markAllMessagesAsDelivered, markMessageAsDelivered, sendCallEventMessage } from './components/ChatFunctions';
 import { CallModal, PlusModal, DropdownMenu } from './components/ChatModals';
 import CallEventMessage from './components/CallEventMessage';
@@ -30,12 +31,12 @@ import { safeJsonParse } from '../../utils/safeJsonParse';
  
 
 // Add ChatImage component for dynamic image sizing
-const ChatImage = ({ uri }) => {
+const ChatImage = ({ uri, skipLoading = false }) => {
   const [imageSize, setImageSize] = useState({width: 100}); // fallback
   const maxWidth = 300;
   const maxHeight = 500;
-  const [loading, setLoading] = useState(true);
-  const [opacity, setOpacity] = useState(new Animated.Value(0));
+  const [loading, setLoading] = useState(!skipLoading);
+  const [opacity, setOpacity] = useState(new Animated.Value(skipLoading ? 1 : 0));
 
   useEffect(() => {
     if (uri) {
@@ -137,11 +138,22 @@ export default function ChatInterface({ route, navigation }) {
     return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' }}><Text style={{ color: '#fff' }}>No chat partner selected.</Text></View>;
   }
   
+  // Show loading screen while creating chat
+  if (isCreatingChat) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' }}>
+        <ActivityIndicator size="large" color="#EC066A" />
+        <Text style={{ color: '#fff', marginTop: 16, fontSize: 16 }}>Creating chat...</Text>
+      </View>
+    );
+  }
+  
   // Use the passed otherUser if available, otherwise fetch from AuthContext
   const [displayUser, setDisplayUser] = useState(null); // This is the chat partner
   const [messages, setMessages] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(resolvedChatId || null);
   const [chatCache, setChatCache] = useState({}); // Cache for chat data
+  const [isCreatingChat, setIsCreatingChat] = useState(false); // Loading state for chat creation
 
   const [lastScrollPosition, setLastScrollPosition] = useState(0);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true); // Only auto-scroll for new messages
@@ -234,6 +246,9 @@ export default function ChatInterface({ route, navigation }) {
   const [outgoingCallStatus, setOutgoingCallStatus] = useState('ringing'); // 'ringing', 'accepted', 'declined', 'timeout'
   const isFocused = useIsFocused();
   
+  // Online status state
+  const [onlineStatusRefresh, setOnlineStatusRefresh] = useState(0);
+  
   // Typing indicator refs
   const typingTimeoutRef = useRef(null);
   const typingDebounceRef = useRef(null);
@@ -275,6 +290,41 @@ export default function ChatInterface({ route, navigation }) {
     }
   }, [currentUser && currentUser._id]);
 
+  // Initialize OnlineStatusService for online status tracking
+  useEffect(() => {
+    if (!currentUser || !resolvedSenderId) return;
+
+    // Initialize the online status service
+    OnlineStatusService.initialize();
+    
+    // Set up periodic refresh of online status
+    const refreshInterval = setInterval(() => {
+      OnlineStatusService.updateOnlineStatus();
+      setOnlineStatusRefresh(prev => prev + 1);
+    }, 30000); // Refresh every 30 seconds
+    
+    // Set users to check (current user and chat partner)
+    const userIds = [currentUser._id, resolvedSenderId].filter(Boolean);
+    console.log('🔍 [ChatInterface] Setting users to check:', userIds);
+    OnlineStatusService.setUsersToCheck(userIds);
+    
+    // Get initial online status
+    setTimeout(async () => {
+      console.log('🔍 [ChatInterface] Updating online status...');
+      await OnlineStatusService.updateOnlineStatus();
+      const onlineUsers = OnlineStatusService.getOnlineUsers();
+      console.log('🔍 [ChatInterface] Online users after update:', onlineUsers);
+      console.log('🔍 [ChatInterface] Is chat partner online?', OnlineStatusService.isUserOnline(resolvedSenderId));
+      setOnlineStatusRefresh(prev => prev + 1);
+    }, 1000);
+    
+    // Cleanup on unmount
+    return () => {
+      clearInterval(refreshInterval);
+      OnlineStatusService.cleanup();
+    };
+  }, [currentUser, resolvedSenderId]);
+
   // Create or fetch chat efficiently using AuthContext data
   useEffect(() => {
     const fetchOrCreateChat = async () => {
@@ -289,6 +339,9 @@ export default function ChatInterface({ route, navigation }) {
           return;
         }
       }
+      
+      // Set loading state for chat creation
+      setIsCreatingChat(true);
       
       // Create chat immediately
       try {
@@ -322,6 +375,8 @@ export default function ChatInterface({ route, navigation }) {
         }
       } catch (e) {
         console.error('Error fetching/creating chat:', e);
+      } finally {
+        setIsCreatingChat(false);
       }
     };
     
@@ -526,8 +581,14 @@ export default function ChatInterface({ route, navigation }) {
           
           if (hasNew) {
             setMessages(prevMsgs => {
+              // Create a map of existing messages for quick lookup
               const prevMap = new Map(prevMsgs.map(m => [m.id, m]));
-              const newMessages = data.messages.map(msg => {
+              
+              // Keep track of temporary messages that should be preserved
+              const tempMessages = prevMsgs.filter(m => m.isTemp);
+              
+              // Process new messages from server
+              const processedMessages = data.messages.map(msg => {
                 const isImage = msg.messageType === 'image' || (typeof msg.message === 'string' && (msg.message.startsWith('http://') || msg.message.startsWith('https://')) && (msg.message.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i)));
                 const isAudio = msg.messageType === 'audio' || (typeof msg.message === 'string' && (msg.message.startsWith('http://') || msg.message.startsWith('https://')) && (msg.message.match(/\.(m4a|mp3|wav|ogg|aac)$/i)));
                 let status = 'sent';
@@ -547,16 +608,19 @@ export default function ChatInterface({ route, navigation }) {
                   messageType: msg.messageType || 'text',
                 };
                 
-                const prev = prevMap.get(msg._id);
-                if (prev) {
+                // If message already exists locally, preserve its UI state
+                const existingMsg = prevMap.get(msg._id);
+                if (existingMsg && !existingMsg.isTemp) {
+                  // Only update status fields, preserve everything else
                   return {
-                    ...prev,
-                    status,
+                    ...existingMsg,
+                    status: status,
                     isRead: msg.isRead,
                     isDelivered: msg.isDelivered,
                   };
                 }
                 
+                // New message from server
                 if (isImage) {
                   return {
                     ...baseMessage,
@@ -585,9 +649,15 @@ export default function ChatInterface({ route, navigation }) {
                 }
               });
               
+              // Combine processed messages with temporary messages
+              const finalMessages = [...processedMessages, ...tempMessages];
+              
+              // Sort by time to maintain order
+              finalMessages.sort((a, b) => new Date(a.time) - new Date(b.time));
+              
               // Update cache in AuthContext
-              updateMessageCache(currentChatId, newMessages);
-              return newMessages;
+              updateMessageCache(currentChatId, processedMessages);
+              return finalMessages;
             });
             lastMessageIds = newIds;
             
@@ -638,21 +708,23 @@ export default function ChatInterface({ route, navigation }) {
     React.useCallback(() => {
       const unreadReceivedMessages = messages.filter(msg => !msg.sent && !msg.isRead);
       if (unreadReceivedMessages.length > 0) {
-        setMessages(prevMsgs =>
-          prevMsgs.map(msg =>
-            !msg.sent && !msg.isRead ? { 
-              ...msg, 
-              status: 'read', 
-              isRead: true 
-            } : msg
-          )
-        );
-        unreadReceivedMessages.forEach(msg => {
-          messageStatusMap.current.set(msg.id, 'read');
-          lastStatusUpdate.current.set(msg.id, Date.now());
-        });
-        markAllMessagesAsRead(unreadReceivedMessages, currentUser._id);
-        markAllMessagesAsDelivered(unreadReceivedMessages, currentUser._id);
+        // Defer state updates to avoid render-phase updates
+        setTimeout(() => {
+          setMessages(prevMsgs =>
+            prevMsgs.map(msg =>
+              !msg.sent && !msg.isRead ? { 
+                ...msg, 
+                status: 'read', 
+                isRead: true 
+              } : msg
+            )
+          );
+          unreadReceivedMessages.forEach(msg => {
+            messageStatusMap.current.set(msg.id, 'read');
+            lastStatusUpdate.current.set(msg.id, Date.now());
+          });
+          markAllMessagesAsRead(unreadReceivedMessages, currentUser._id);
+        }, 0);
       }
     }, [messages, currentUser?._id])
   );
@@ -727,28 +799,46 @@ export default function ChatInterface({ route, navigation }) {
               const messageExists = prev.some(msg => msg.id === newMessage.id);
               if (messageExists) return prev;
               if (newMessage.sent) {
-                // Handle sent messages - replace temporary message
-                const updatedMessages = prev.map(msg => {
-                  if (msg.isTemp && msg.text === newMessage.text && msg.sent) {
-                    return { ...newMessage, status: 'sent' };
-                  }
-                  return msg;
-                });
-                const tempMessageReplaced = updatedMessages.some(msg => msg.id === newMessage.id && !msg.isTemp);
-                if (!tempMessageReplaced) {
-                  return [...updatedMessages, newMessage];
+                // Handle sent messages - check if this is replacing a temp message
+                const tempMessageIndex = prev.findIndex(msg => 
+                  msg.isTemp && msg.sent && (
+                    // For text messages, compare text content
+                    (msg.messageType === 'text' && msg.text === newMessage.text) ||
+                    // For image messages, check if it's the same image type
+                    (msg.messageType === 'image' && newMessage.messageType === 'image') ||
+                    // For audio messages, check if it's the same audio type
+                    (msg.messageType === 'audio' && newMessage.messageType === 'audio')
+                  )
+                );
+                
+                if (tempMessageIndex !== -1) {
+                  // Replace temporary message with the real one
+                  const updatedMessages = [...prev];
+                  updatedMessages[tempMessageIndex] = {
+                    ...prev[tempMessageIndex], // Preserve UI-specific properties
+                    ...newMessage,
+                    status: 'sent',
+                    isTemp: false,
+                    isOptimistic: false, // Remove optimistic flag
+                  };
+                  
+                  // Schedule status update to delivered
+                  setTimeout(() => {
+                    const currentStatus = messageStatusMap.current.get(newMessage.id);
+                    if (currentStatus === 'sent') {
+                      messageStatusMap.current.set(newMessage.id, 'delivered');
+                      lastStatusUpdate.current.set(newMessage.id, Date.now());
+                      setMessages(prev => prev.map(msg =>
+                        msg.id === newMessage.id ? { ...msg, status: 'delivered', isOptimistic: false } : msg
+                      ));
+                    }
+                  }, 2000); // Increased delay for smoother transition
+                  
+                  return updatedMessages;
+                } else {
+                  // New message not replacing a temp one
+                  return [...prev, newMessage];
                 }
-                setTimeout(() => {
-                  const currentStatus = messageStatusMap.current.get(newMessage.id);
-                  if (currentStatus === 'sent') {
-                    messageStatusMap.current.set(newMessage.id, 'delivered');
-                    lastStatusUpdate.current.set(newMessage.id, Date.now());
-                    setMessages(prev => prev.map(msg =>
-                      msg.id === newMessage.id ? { ...msg, status: 'delivered' } : msg
-                    ));
-                  }
-                }, 1000);
-                return updatedMessages;
               } else {
                 // Handle received messages - mark as read immediately
                 const messageToAdd = { ...newMessage, status: 'read', isRead: true };
@@ -856,21 +946,44 @@ export default function ChatInterface({ route, navigation }) {
             const serverMessages = data.messages;
             
             setMessages(prev => {
-              // Only add new messages from the backend, never update isRead/status for existing ones
-              const existingIds = new Set(prev.map(m => m.id));
-              const newMsgs = serverMessages
-                .filter(sm => !existingIds.has(sm._id))
-                .map(sm => ({
-                  id: sm._id,
-                  text: sm.message,
-                  messageType: sm.messageType,
-                  time: new Date(sm.timestamp),
-                  sent: sm.senderId._id === currentUser._id,
-                  status: sm.isRead ? 'read' : (sm.isDelivered ? 'delivered' : 'sent'),
-                  senderId: sm.senderId,
-                  isRead: sm.isRead,
-                }));
-              return [...prev, ...newMsgs];
+              // Create a map of existing messages for quick lookup
+              const existingMap = new Map(prev.map(m => [m.id, m]));
+              
+              // Process all server messages
+              const updatedMessages = serverMessages.map(sm => {
+                const existing = existingMap.get(sm._id);
+                if (existing) {
+                  // Update existing message with server status
+                  return {
+                    ...existing,
+                    status: sm.isRead ? 'read' : (sm.isDelivered ? 'delivered' : 'sent'),
+                    isRead: sm.isRead || false,
+                    isDelivered: sm.isDelivered || false,
+                  };
+                } else {
+                  // Add new message
+                  return {
+                    id: sm._id,
+                    text: sm.message,
+                    messageType: sm.messageType,
+                    time: new Date(sm.timestamp),
+                    sent: sm.senderId._id === currentUser._id,
+                    status: sm.isRead ? 'read' : (sm.isDelivered ? 'delivered' : 'sent'),
+                    senderId: sm.senderId,
+                    isRead: sm.isRead || false,
+                    isDelivered: sm.isDelivered || false,
+                  };
+                }
+              });
+              
+              // Preserve temporary messages
+              const tempMessages = prev.filter(m => m.isTemp);
+              const finalMessages = [...updatedMessages, ...tempMessages];
+              
+              // Sort by time to maintain order
+              finalMessages.sort((a, b) => new Date(a.time) - new Date(b.time));
+              
+              return finalMessages;
             });
           }
         } catch (error) {
@@ -1116,16 +1229,13 @@ export default function ChatInterface({ route, navigation }) {
     }
   };
 
-  const renderMessageStatus = (status) => {
+  const renderMessageStatus = (status, isOptimistic = false) => {
+    // For optimistic messages, always show sent indicator
+    if (isOptimistic || status === 'sent' || status === 'sending') {
+      return <Image source={sentImg} style={{ width: 16, height: 8, marginLeft: 4, resizeMode: 'contain' }} />;
+    }
+    
     switch (status) {
-      case 'sending':
-        return (
-          <View style={{ marginLeft: 4, flexDirection: 'row', alignItems: 'center' }}>
-            <View style={styles.sendingDot} />
-          </View>
-        );
-      case 'sent':
-        return <Image source={sentImg} style={{ width: 16, height: 8, marginLeft: 4, resizeMode: 'contain' }} />;
       case 'delivered':
         return <Image source={sentImg} style={{ width: 16, height: 8, marginLeft: 4, resizeMode: 'contain' }} />;
       case 'read':
@@ -1308,19 +1418,22 @@ export default function ChatInterface({ route, navigation }) {
       const uri = await audioRecorder.stopRecording();
       
       // Add temporary message immediately with stable properties
-      const tempMessageId = `temp_${Date.now()}`;
+      const tempMessageId = `temp_audio_${Date.now()}`;
       const tempMessage = {
         id: tempMessageId,
         message: uri, // Use local URI temporarily
         messageType: 'audio',
         time: new Date(),
         sent: true,
-        status: 'sending',
+        status: 'sent', // Show as sent immediately
         isTemp: true,
         // Add stable properties to prevent unnecessary re-renders
         senderId: currentUser?._id,
         receiverId: resolvedSenderId,
         chatId: currentChatId,
+        // Keep the same time reference
+        originalTime: new Date(),
+        isOptimistic: true, // Flag to indicate this is optimistic UI
       };
       setMessages(prev => [...prev, tempMessage]);
       
@@ -1369,15 +1482,22 @@ export default function ChatInterface({ route, navigation }) {
           if (!sendRes.ok) throw new Error('Failed to send audio message');
           
           // Update temp message with real URL - use minimal update to prevent flickering
+          const sendData = await sendRes.json();
+          const sentMessage = sendData.messageData || sendData;
+          
           setMessages(prev => prev.map(msg => 
             msg.id === tempMessageId ? {
               ...msg,
+              id: sentMessage._id || msg.id, // Update with real ID from server
               message: audioUrl,
               isTemp: false,
               status: 'sent',
               messageType: 'audio',
+              isRead: sentMessage.isRead || false,
+              isDelivered: sentMessage.isDelivered || false,
+              isOptimistic: false, // Remove optimistic flag
               // Preserve exact same references for stable properties
-              time: msg.time,
+              time: msg.originalTime || msg.time,
               sent: msg.sent,
               senderId: msg.senderId,
               receiverId: msg.receiverId,
@@ -1486,9 +1606,12 @@ export default function ChatInterface({ route, navigation }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
             {displayUser ? (
               <>
-                <Image source={getImageSource(displayUser?.profilePicture || displayUser?.profilePictures?.[0])} style={styles.avatar} />
+                <View style={styles.avatarContainer}>
+                  <Image source={getImageSource(displayUser?.profilePicture || displayUser?.profilePictures?.[0])} style={styles.avatar} />
+                  {OnlineStatusService.isUserOnline(resolvedSenderId) && onlineStatusRefresh >= 0 && <View style={styles.onlineIndicator} />}
+                </View>
                 <Text style={styles.name}>{displayUser?.username || displayUser?.name || 'User'}</Text>
-                {(displayUser?.verified || displayUser?.verificationStatus === 'true') && (
+                {(displayUser?.verified || displayUser?.verificationStatus === 'verified') && (
                   <MaterialIcons name="verified" size={18} color="#ff2d7a" style={{ marginLeft: 4 }} />
                 )}
               </>
@@ -1600,6 +1723,12 @@ export default function ChatInterface({ route, navigation }) {
             }
             
             console.log('📹 Initiating video call with channel:', channelName);
+            console.log('📹 Call parameters:', {
+              toUserId: resolvedSenderId,
+              fromUserId: currentUser._id,
+              callerName: currentUser.username || currentUser.name || 'User',
+              channelName: channelName
+            });
             
             // Emit call_user event
             SocketManager.emitCallUser({
@@ -1654,7 +1783,12 @@ export default function ChatInterface({ route, navigation }) {
         <DropdownMenu
           visible={menuVisible}
           onClose={() => setMenuVisible(false)}
-          onViewProfilePress={() => { setMenuVisible(false); }}
+          onViewProfilePress={() => { 
+            setMenuVisible(false); 
+            if (resolvedSenderId) {
+              navigation.navigate('MatchDetail', { userId: resolvedSenderId });
+            }
+          }}
           onCancelConnectionPress={() => {
             setMenuVisible(false);
             setCancelModalVisible(true);
@@ -1725,8 +1859,16 @@ export default function ChatInterface({ route, navigation }) {
                         body: JSON.stringify({ targetUserId: resolvedSenderId }),
                       });
                       if (res.ok) {
+                        const responseData = await res.json().catch(() => ({}));
                         setCancelModalVisible(false);
-                        Alert.alert('Connection cancelled', 'You have cancelled this connection.');
+                        
+                        // Update user data in AuthContext with the response data
+                        if (responseData && updateUser) {
+                          console.log('🔄 [ChatInterface] Updating user data after connection canceled');
+                          updateUser(responseData);
+                        }
+                        
+                        // Alert removed as requested
                         navigation.goBack({
                           params: {
                             connectionCanceled: true,
@@ -1763,7 +1905,15 @@ export default function ChatInterface({ route, navigation }) {
           ref={flatListRef}
           data={groupedMessages}
           inverted={true}
-          keyExtractor={(item, index) => `group-${index}`}
+          keyExtractor={(item, index) => {
+            if (item.type === 'dateDivider') {
+              return `date-${item.date}-${index}`;
+            }
+            if (item.type === 'messageGroup') {
+              return `group-${item.time}-${item.messages.length}-${index}`;
+            }
+            return `item-${index}`;
+          }}
           renderItem={({ item: group, index: groupIdx }) => {
             // Handle date dividers
             if (group.type === 'dateDivider') {
@@ -1786,6 +1936,9 @@ export default function ChatInterface({ route, navigation }) {
               const statusStrings = Object.keys(statusOrder);
               const lowestStatus = statusStrings.find(key => statusOrder[key] === groupStatus) || 'sent';
               
+              // Check if any message in the group is optimistic
+              const hasOptimisticMessage = group.messages.some(msg => msg.isOptimistic || msg.isTemp);
+              
               return (
                 <View style={{ marginBottom: 8 }}>
                   {group.messages.map((msg, msgIdx) => {
@@ -1804,7 +1957,7 @@ export default function ChatInterface({ route, navigation }) {
                       <View key={msgIdx} style={group.sent ? styles.sentMessageContainer : styles.receivedMessageContainer}>
                         {(msg.image || (msg.messageType === 'image' && msg.message)) ? (
                           <View style={{ borderRadius: 8, maxWidth: 220, overflow: 'hidden', backgroundColor: 'transparent', padding: 0 }}>
-                            <ChatImage uri={msg.image || msg.message} />
+                            <ChatImage uri={msg.image || msg.message} skipLoading={msg.isOptimistic} />
                           </View>
                         ) : msg.messageType === 'audio' && msg.message ? (
                           <View style={group.sent ? styles.sentBubble : styles.receivedBubble}>
@@ -1828,7 +1981,7 @@ export default function ChatInterface({ route, navigation }) {
                          group.time && typeof group.time === 'string' ? new Date(group.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) :
                          'Unknown time'}
                     </Text>
-                    {group.sent && group.messages.length > 0 && renderMessageStatus(lowestStatus)}
+                    {group.sent && group.messages.length > 0 && renderMessageStatus(lowestStatus, hasOptimisticMessage)}
                   </View>
                 </View>
               );
@@ -1881,7 +2034,6 @@ export default function ChatInterface({ route, navigation }) {
             setPlusModalVisible,
             emitTypingStatus
           })}
-          onAudioSelect={() => { setPlusModalVisible(false); Alert.alert('Audio', 'Audio feature coming soon!'); }}
           styles={styles}
         />
 
@@ -1979,11 +2131,25 @@ const styles = StyleSheet.create({
     marginRight: 6,
     padding: 4,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 8,
+  },
   avatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    marginRight: 8,
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6ec531',
+    borderWidth: 2,
+    borderColor: '#121212',
   },
   name: {
     color: '#fff',

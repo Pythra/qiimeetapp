@@ -17,7 +17,7 @@ const AudioWaveformRecorder = ({
   // Create animated bars for waveform
   const waveformBars = useMemo(() => {
     const bars = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 35; i++) {
       bars.push(new Animated.Value(0.3));
     }
     return bars;
@@ -28,7 +28,7 @@ const AudioWaveformRecorder = ({
     if (!isRecording || isPaused) return;
     
     const animations = waveformBars.map((bar, index) => {
-      const randomHeight = Math.random() * 0.7 + 0.3; // 0.3 to 1.0
+      const randomHeight = Math.random() * 0.9 + 0.1; // 0.1 to 1.0 (maximum variation)
       return Animated.timing(bar, {
         toValue: randomHeight,
         duration: 200 + Math.random() * 300, // 200-500ms
@@ -143,7 +143,7 @@ const AudioWaveformRecorder = ({
                         {
                           height: bar.interpolate({
                             inputRange: [0, 1],
-                            outputRange: ['6px', '20px'],
+                            outputRange: ['8px', '40px'],
                           }),
                         },
                       ]}
@@ -242,14 +242,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 30,
+    height: 40,
     gap: 2,
   },
   waveformBar: {
-    width: 3,
-    backgroundColor: '#ff2d7a',
-    borderRadius: 2,
-    minHeight: 6,
+    width: 2,
+    backgroundColor: '#888888',
+    borderRadius: 1,
+    minHeight: 8,
   },
   placeholderWaveform: {
     flex: 1,

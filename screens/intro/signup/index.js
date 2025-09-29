@@ -3,12 +3,13 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Image,
   SafeAreaView, KeyboardAvoidingView, Platform, Dimensions, Alert, ActivityIndicator, Modal,
 } from 'react-native';
+import OAuthErrorModal from './OAuthErrorModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Colors from '../../../constants/Colors';
 import CustomButton from '../../../constants/button';
 import { FONTS } from '../../../constants/font';
 import { TEXT_STYLES } from '../../../constants/text';
-import { usePhoneNumber, formatPhoneNumber } from './phonenumber';
+import { usePhoneNumber, formatPhoneNumber } from './Phone';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
@@ -17,7 +18,6 @@ import { useSSO, useAuth, useUser } from '@clerk/clerk-expo'; // Updated Clerk i
 import { API_BASE_URL, CLERK_PUBLISHABLE_KEY } from '../../../env';
 import { useAuth as useAuthContext } from '../../../components/AuthContext';
 import { WebView } from 'react-native-webview';
-
 const { width, height } = Dimensions.get('window');
 const googleIcon = require('../../../assets/google.png');
 const fbIcon = require('../../../assets/fb.png');
@@ -66,12 +66,16 @@ const PhoneNumberScreen = ({ navigation }) => {
 
       if (signInResponse.ok) {
         const signInResult = await signInResponse.json();
+        console.log('[Signup] Social login response data:', signInResult);
+        
         if (signInResult.token) {
           // Store credentials
           await AsyncStorage.multiSet([
             ['token', signInResult.token],
             ['userId', signInResult.user?._id || signInResult.userId || clerkId]
           ]);
+
+          console.log('[Signup] Credentials stored, attempting login with auth context...');
 
           // Login using auth context
           const loginSuccess = await login(signInResult.token, signInResult.user);
@@ -86,14 +90,27 @@ const PhoneNumberScreen = ({ navigation }) => {
             setIsAutoLoginInProgress(false);
             
             // Navigate to MainTabs
+            navigation.navigate('MainTabs');
+            return true;
+          } else {
+            console.error('[Signup] Login with auth context failed');
+            // Even if login fails, we have valid credentials, try to navigate anyway
             setIsNavigating(true);
             navigation.navigate('MainTabs');
             return true;
           }
+        } else {
+          console.error('[Signup] No token in social login response');
+          return false;
         }
       } else if (signInResponse.status === 404) {
         // User doesn't exist in backend, this is expected for new users
         console.log('[Signup] User not found in backend (expected for new users)');
+        return false;
+      } else {
+        // Handle other error statuses
+        const errorText = await signInResponse.text();
+        console.error('[Signup] Social login failed with status:', signInResponse.status, 'Error:', errorText);
         return false;
       }
 
@@ -221,12 +238,34 @@ const PhoneNumberScreen = ({ navigation }) => {
             console.log('[Signup] Quick existing user check successful');
             return;
           }
+          
+          // If handleExistingUserSignIn failed, check if credentials were stored anyway
+          const [retryToken, retryUserId] = await AsyncStorage.multiGet(['token', 'userId']).then((pairs) => pairs.map(([, v]) => v));
+          if (retryToken && retryUserId) {
+            console.log('[Signup] Found credentials after failed sign in check, navigating to MainTabs');
+            setIsNavigating(true);
+            navigation.navigate('MainTabs');
+            return;
+          }
         }
         
         console.log('[Signup] No existing user found, user may need to complete setup');
         
       } catch (error) {
         console.warn('[Signup] Error in auth monitoring:', error);
+        
+        // Even on error, check if we have credentials
+        try {
+          const [errorToken, errorUserId] = await AsyncStorage.multiGet(['token', 'userId']).then((pairs) => pairs.map(([, v]) => v));
+          if (errorToken && errorUserId) {
+            console.log('[Signup] Found credentials despite error, navigating to MainTabs');
+            setIsNavigating(true);
+            navigation.navigate('MainTabs');
+            return;
+          }
+        } catch (storageError) {
+          console.warn('[Signup] Error checking storage after auth monitoring error:', storageError);
+        }
       }
     };
     
@@ -238,53 +277,49 @@ const PhoneNumberScreen = ({ navigation }) => {
     return () => clearTimeout(timer);
   }, [isSignedIn, clerkUser, isLoaded]);
 
-  // Enhanced monitoring for auth state changes with immediate action
+  // Additional monitoring for OAuth completion when Clerk state hasn't updated yet
   React.useEffect(() => {
-    const checkAuthAndNavigate = async () => {
-      // Only proceed if Clerk is loaded and user is signed in
-      if (!isLoaded || !isSignedIn || !clerkUser) return;
+    let hasNavigated = false; // Prevent multiple navigations
+    
+    const checkOAuthCompletion = async () => {
+      // Only check if we're not in progress and Clerk is loaded
+      if (isSocialLoginInProgress || isOAuthInProgress || isAutoLoginInProgress || isCheckingCredentials || !isLoaded || hasNavigated) return;
       
-      // Skip if any operation is in progress
-      if (isSocialLoginInProgress || isOAuthInProgress || isAutoLoginInProgress || isCheckingCredentials) return;
+      // Check if we have credentials that might have been created by OAuth
+      const [token, userId, isNewSignup] = await AsyncStorage.multiGet(['token', 'userId', 'isNewSignup']).then((pairs) => pairs.map(([, v]) => v));
       
-      console.log('[Signup] Auth state monitoring - user is signed in, checking navigation...');
-      
-      try {
-        // Quick check for existing credentials
-        const [token, userId] = await AsyncStorage.multiGet(['token', 'userId']).then((pairs) => pairs.map(([, v]) => v));
+      if (token && userId && !isSignedIn) {
+        console.log('[Signup] OAuth completion detected - credentials exist but Clerk not signed in yet');
         
-        if (token && userId) {
-          console.log('[Signup] Found credentials, navigating immediately');
+        // Check if this is a new signup to determine navigation destination
+        if (isNewSignup === 'true') {
+          console.log('[Signup] New signup detected, navigating to Welcome screen');
+          hasNavigated = true; // Prevent further checks
+          // Clear the signup flag
+          await AsyncStorage.removeItem('isNewSignup');
           setIsNavigating(true);
-          navigation.navigate('MainTabs');
-          return;
+          // Add a small delay to ensure navigation context is ready
+          setTimeout(() => {
+            navigation.navigate('Onboarding', { screen: 'Welcome' });
+          }, 200);
+        } else {
+          console.log('[Signup] Existing user, navigating to MainTabs');
+          hasNavigated = true; // Prevent further checks
+          setIsNavigating(true);
+          // Add a small delay to ensure navigation context is ready
+          setTimeout(() => {
+            navigation.navigate('MainTabs');
+          }, 200);
         }
-        
-        // Try to get existing user
-        const clerkId = clerkUser?.id;
-        if (clerkId) {
-          console.log('[Signup] Attempting quick existing user check...');
-          const success = await handleExistingUserSignIn(clerkUser, 'google', clerkId);
-          if (success) {
-            console.log('[Signup] Quick existing user check successful');
-            return;
-          }
-        }
-        
-        console.log('[Signup] No existing user found, user may need to complete setup');
-        
-      } catch (error) {
-        console.warn('[Signup] Error in auth monitoring:', error);
+        return;
       }
     };
     
-    // Run immediately and set up a timer for delayed check
-    checkAuthAndNavigate();
+    // Check periodically for OAuth completion
+    const interval = setInterval(checkOAuthCompletion, 1000);
     
-    const timer = setTimeout(checkAuthAndNavigate, 1500);
-    
-    return () => clearTimeout(timer);
-  }, [isSignedIn, clerkUser, isLoaded]);
+    return () => clearInterval(interval);
+  }, [isSignedIn, isLoaded, isSocialLoginInProgress, isOAuthInProgress, isAutoLoginInProgress, isCheckingCredentials]);
 
   // Aggressive cleanup function for persistent authentication issues
   const performAggressiveCleanup = async () => {
@@ -370,7 +405,11 @@ const PhoneNumberScreen = ({ navigation }) => {
   const [oauthProvider, setOauthProvider] = useState(null);
   const [oauthResultData, setOauthResultData] = useState(null);
   
-  // Simplified attemptAutoLogin function
+  // OAuth Error Modal state
+  const [showOAuthErrorModal, setShowOAuthErrorModal] = useState(false);
+  const [oauthErrorDetails, setOauthErrorDetails] = useState({});
+  
+  // Enhanced attemptAutoLogin function
   const attemptAutoLogin = async (provider = 'google') => {
     if (isAutoLoginInProgress) {
       console.log('[Signup] Auto-login already in progress, skipping...');
@@ -404,10 +443,38 @@ const PhoneNumberScreen = ({ navigation }) => {
       console.log('[Signup] Attempting existing user sign in with Clerk ID:', clerkId);
       const success = await handleExistingUserSignIn(clerkUser, provider, clerkId);
       
-      return success;
+      if (success) {
+        return true;
+      }
+      
+      // If handleExistingUserSignIn fails, check if we have credentials anyway
+      // This handles the case where the backend call succeeded but the response wasn't handled properly
+      const [retryToken, retryUserId] = await AsyncStorage.multiGet(['token', 'userId']).then((pairs) => pairs.map(([, v]) => v));
+      if (retryToken && retryUserId) {
+        console.log('[Signup] Found credentials after failed sign in, navigating to MainTabs');
+        setIsNavigating(true);
+        navigation.navigate('MainTabs');
+        return true;
+      }
+      
+      return false;
       
     } catch (error) {
       console.warn('[Signup] Error in auto-login:', error);
+      
+      // Even on error, check if we have credentials
+      try {
+        const [errorToken, errorUserId] = await AsyncStorage.multiGet(['token', 'userId']).then((pairs) => pairs.map(([, v]) => v));
+        if (errorToken && errorUserId) {
+          console.log('[Signup] Found credentials despite error, navigating to MainTabs');
+          setIsNavigating(true);
+          navigation.navigate('MainTabs');
+          return true;
+        }
+      } catch (storageError) {
+        console.warn('[Signup] Error checking storage after auto-login error:', storageError);
+      }
+      
       return false;
     } finally {
       setIsAutoLoginInProgress(false);
@@ -454,14 +521,15 @@ const PhoneNumberScreen = ({ navigation }) => {
   };
 
   // Handle OAuth callback from WebView
+  // Improved logic to better handle existing vs new users:
+  // 1. Try to get user data from OAuth result first
+  // 2. If no OAuth data, try social login for existing users
+  // 3. Only create new accounts if user doesn't exist
+  // 4. Properly detect existing users from backend responses
   const handleOAuthCallback = async (url, oauthResultData = null) => {
     try {
-      console.log('🔍 [OAuth Debug] ===== OAuth Callback Started =====');
+      console.log('🔍 [OAuth Debug] OAuth Callback Started');
       console.log('🔍 [OAuth Debug] Callback URL:', url);
-      console.log('🔍 [OAuth Debug] OAuth Result Data:', oauthResultData);
-      console.log('🔍 [OAuth Debug] Current Clerk User:', clerkUser);
-      console.log('🔍 [OAuth Debug] Is Signed In:', isSignedIn);
-      console.log('🔍 [OAuth Debug] Is Loaded:', isLoaded);
       
       // Parse the callback URL - handle both formats
       const createdSessionIdMatch = url.match(/[?&]created_session_id=([^&]+)/);
@@ -470,14 +538,13 @@ const PhoneNumberScreen = ({ navigation }) => {
       // Check if this is an sso-callback (which means OAuth was successful)
       const isSSOCallback = url.includes('sso-callback');
       
-      console.log('🔍 [OAuth Debug] URL Parsing Results:');
-      console.log('🔍 [OAuth Debug] - Created Session ID Match:', createdSessionIdMatch);
-      console.log('🔍 [OAuth Debug] - Error Match:', errorMatch);
-      console.log('🔍 [OAuth Debug] - Is SSO Callback:', isSSOCallback);
-      
       if (errorMatch) {
-        console.log('❌ [OAuth Debug] OAuth error detected:', errorMatch[1]);
-        Alert.alert('Authentication Error', 'OAuth authentication failed. Please try again.');
+        console.error('❌ [OAuth Debug] OAuth error detected:', errorMatch[1]);
+        showOAuthError(
+          'OAuth Authentication Failed',
+          'The OAuth authentication process encountered an error. Please try signing in again.',
+          oauthProvider
+        );
         cleanupOAuthState();
         return;
       }
@@ -486,18 +553,22 @@ const PhoneNumberScreen = ({ navigation }) => {
       if (createdSessionIdMatch || isSSOCallback) {
         let sessionId = null;
         
-      if (createdSessionIdMatch) {
+        if (createdSessionIdMatch) {
           sessionId = createdSessionIdMatch[1];
-          console.log('✅ [OAuth Debug] Clerk session created via URL param, session ID:', sessionId);
+          console.log('✅ [OAuth Debug] Session ID:', sessionId);
         } else if (isSSOCallback && oauthResultData) {
           // Extract session ID from OAuth result data
           sessionId = oauthResultData.createdSessionId;
-          console.log('✅ [OAuth Debug] Clerk session created via sso-callback, session ID:', sessionId);
+          console.log('✅ [OAuth Debug] Session ID:', sessionId);
         }
         
         if (!sessionId) {
           console.error('❌ [OAuth Debug] No session ID found in OAuth result');
-          Alert.alert('Authentication Error', 'Failed to create session. Please try again.');
+          showOAuthError(
+            'Session Creation Failed',
+            'We were unable to create a secure session for your authentication. Please try signing in again.',
+            oauthProvider
+          );
           cleanupOAuthState();
           return;
         }
@@ -506,127 +577,312 @@ const PhoneNumberScreen = ({ navigation }) => {
         setShowOAuthWebView(false);
         setOauthUrl(null);
         
-        console.log('🔍 [OAuth Debug] WebView closed, starting session activation...');
-        
         // Activate the session using the result data
         if (oauthResultData && oauthResultData.setActive) {
           try {
-            console.log('🔍 [OAuth Debug] Attempting to activate session with oauthResultData.setActive');
-            console.log('🔍 [OAuth Debug] Using sessionId:', sessionId);
             await oauthResultData.setActive({ session: sessionId });
-            console.log('✅ [OAuth Debug] Session manually activated');
+            console.log('✅ [OAuth Debug] Session activated');
           } catch (error) {
-            console.warn('⚠️ [OAuth Debug] Failed to manually activate session:', error);
+            console.warn('⚠️ [OAuth Debug] Failed to activate session:', error);
           }
-        } else {
-          console.log('⚠️ [OAuth Debug] No oauthResultData.setActive available');
         }
         
         // Wait for Clerk to update its state and populate user data
-        console.log('⏳ [OAuth Debug] Waiting for Clerk to populate user data...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log('⏳ [OAuth Debug] Waiting for Clerk user data...');
+        console.log('🔍 [OAuth Debug] Session activated, waiting for user data to populate...');
         
-        console.log('🔍 [OAuth Debug] After 3 second wait - Clerk User State:');
-        console.log('🔍 [OAuth Debug] - clerkUser:', clerkUser);
-        console.log('🔍 [OAuth Debug] - isSignedIn:', isSignedIn);
-        console.log('🔍 [OAuth Debug] - isLoaded:', isLoaded);
+        // Reduced delay for faster response
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Force refresh Clerk user data
-        try {
-          if (clerkUser?.reload) {
-            console.log('🔍 [OAuth Debug] Attempting to reload Clerk user data...');
-            await clerkUser.reload();
-            console.log('✅ [OAuth Debug] Clerk user data reloaded');
+        // Force refresh Clerk user data and get current user
+        let currentClerkUser = null;
+        let attempts = 0;
+        
+        console.log('🔍 [OAuth Debug] Starting user data retrieval...');
+        console.log('🔍 [OAuth Debug] - Initial clerkUser state:', clerkUser?.id ? 'Available' : 'Not Available');
+        console.log('🔍 [OAuth Debug] - clerkUser object:', {
+          id: clerkUser?.id,
+          email: clerkUser?.primaryEmailAddress?.emailAddress,
+          firstName: clerkUser?.firstName,
+          lastName: clerkUser?.lastName,
+          hasReload: !!clerkUser?.reload
+        });
+        
+        // First, try to get user data directly from the OAuth result
+        if (oauthResultData?.signIn?.userData && Object.keys(oauthResultData.signIn.userData).length > 0) {
+          console.log('✅ [OAuth Debug] Found user data directly in OAuth result');
+          const userData = oauthResultData.signIn.userData;
+          console.log('🔍 [OAuth Debug] - userData keys:', Object.keys(userData));
+          
+          // If we have user data, we can proceed without waiting for Clerk hook
+          if (userData.email) {
+            console.log('🔍 [OAuth Debug] - email:', userData.email);
+            console.log('🔍 [OAuth Debug] - firstName:', userData.firstName);
+            console.log('🔍 [OAuth Debug] - lastName:', userData.lastName);
             
-            console.log('🔍 [OAuth Debug] After reload - Clerk User State:');
-            console.log('🔍 [OAuth Debug] - clerkUser:', clerkUser);
-            console.log('🔍 [OAuth Debug] - clerkUser.id:', clerkUser?.id);
-            console.log('🔍 [OAuth Debug] - clerkUser.firstName:', clerkUser?.firstName);
-            console.log('🔍 [OAuth Debug] - clerkUser.lastName:', clerkUser?.lastName);
-            console.log('🔍 [OAuth Debug] - clerkUser.primaryEmailAddress:', clerkUser?.primaryEmailAddress);
-            console.log('🔍 [OAuth Debug] - clerkUser.emailAddresses:', clerkUser?.emailAddresses);
+            // Try to find existing user by email immediately
+            try {
+              const findUserResponse = await fetch(`${API_BASE_URL}/auth/find-user-by-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  email: userData.email,
+                  provider: oauthProvider
+                }),
+              });
+              
+              if (findUserResponse.ok) {
+                const findUserResult = await findUserResponse.json();
+                console.log('🔍 [Database Debug] Find user response:', findUserResult);
+                
+                if (findUserResult.success && findUserResult.user) {
+                  console.log('✅ [OAuth Debug] Found existing user by email from OAuth userData');
+                  console.log('🔍 [Database Debug] User details from database:');
+                  console.log('🔍 [Database Debug] - userId:', findUserResult.user._id);
+                  console.log('🔍 [Database Debug] - clerkId:', findUserResult.user.clerkId);
+                  console.log('🔍 [Database Debug] - email:', findUserResult.user.email);
+                  console.log('🔍 [Database Debug] - firstName:', findUserResult.user.firstname);
+                  console.log('🔍 [Database Debug] - lastName:', findUserResult.user.lastname);
+                  console.log('🔍 [Database Debug] - socialProvider:', findUserResult.user.socialProvider);
+                  
+                  // Try to login with existing user data
+                  const loginUserData = {
+                    clerkId: findUserResult.user.clerkId || sessionId,
+                    email: userData.email,
+                    firstName: userData.firstName || findUserResult.user.firstname,
+                    lastName: userData.lastName || findUserResult.user.lastname,
+                    isNewUser: false
+                  };
+                  
+                  console.log('🔍 [Database Debug] Login attempt with user data:', loginUserData);
+                  
+                  const accountResult = await createUserAccount(loginUserData, oauthProvider);
+                  
+                  if (accountResult && accountResult.token) {
+                    console.log('✅ [OAuth Debug] Login successful with existing user data from OAuth');
+                    setIsNavigating(true);
+                    setTimeout(() => {
+                      navigation.navigate('MainTabs');
+                      setTimeout(() => cleanupOAuthState(), 1000);
+                    }, 500);
+                    return;
+                  }
+                } else {
+                  console.log('⚠️ [Database Debug] No user found in database for email:', userData.email);
+                  console.log('🔍 [Database Debug] Response details:', findUserResult);
+                }
+              } else {
+                console.log('❌ [Database Debug] Find user request failed with status:', findUserResponse.status);
+                try {
+                  const errorResponse = await findUserResponse.text();
+                  console.log('🔍 [Database Debug] Error response body:', errorResponse);
+                } catch (e) {
+                  console.log('🔍 [Database Debug] Could not read error response body');
+                }
+              }
+            } catch (error) {
+              console.error('❌ [OAuth Debug] Error finding existing user by OAuth email:', error);
+            }
+          }
+        }
+        
+        // Since OAuth result doesn't contain user data, try to get it from Clerk's session
+        console.log('🔍 [OAuth Debug] OAuth result missing user data, attempting to get from Clerk session...');
+        
+        // Try to get user data from Clerk's current session
+        try {
+          // Minimal delay for Clerk to populate the session
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Try to reload the user data immediately
+          if (clerkUser?.reload) {
+            console.log('🔍 [OAuth Debug] Immediately reloading clerkUser...');
+            await clerkUser.reload();
+          }
+          
+          // Check if we now have user data
+          if (clerkUser?.id) {
+            console.log('✅ [OAuth Debug] Successfully got user data from Clerk:');
+            console.log('🔍 [OAuth Debug] - Clerk ID:', clerkUser.id);
+            console.log('🔍 [OAuth Debug] - Email:', clerkUser.primaryEmailAddress?.emailAddress);
+            console.log('🔍 [OAuth Debug] - First Name:', clerkUser.firstName);
+            console.log('🔍 [OAuth Debug] - Last Name:', clerkUser.lastName);
+            
+            // Now try to find existing user by this email
+            const email = clerkUser.primaryEmailAddress?.emailAddress;
+            if (email) {
+              console.log('🔍 [OAuth Debug] Attempting to find existing user by Clerk email:', email);
+              
+              const findUserResponse = await fetch(`${API_BASE_URL}/auth/find-user-by-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  email: email,
+                  provider: oauthProvider
+                }),
+              });
+              
+              if (findUserResponse.ok) {
+                const findUserResult = await findUserResponse.json();
+                console.log('🔍 [Database Debug] Find user response (Clerk):', findUserResult);
+                
+                if (findUserResult.success && findUserResult.user) {
+                  console.log('✅ [OAuth Debug] Found existing user by Clerk email');
+                  console.log('🔍 [Database Debug] User details from database (Clerk):');
+                  console.log('🔍 [Database Debug] - userId:', findUserResult.user._id);
+                  console.log('🔍 [Database Debug] - clerkId:', findUserResult.user.clerkId);
+                  console.log('🔍 [Database Debug] - email:', findUserResult.user.email);
+                  console.log('🔍 [Database Debug] - firstName:', findUserResult.user.firstname);
+                  console.log('🔍 [Database Debug] - lastName:', findUserResult.user.lastname);
+                  console.log('🔍 [Database Debug] - socialProvider:', findUserResult.user.socialProvider);
+                  
+                  // Try to login with existing user data
+                  const loginUserData = {
+                    clerkId: findUserResult.user.clerkId || clerkUser.id,
+                    email: email,
+                    firstName: clerkUser.firstName || findUserResult.user.firstname,
+                    lastName: clerkUser.lastName || findUserResult.user.lastname,
+                    isNewUser: false
+                  };
+                  
+                  console.log('🔍 [Database Debug] Login attempt with user data (Clerk):', loginUserData);
+                  
+                  const accountResult = await createUserAccount(loginUserData, oauthProvider);
+                  
+                  if (accountResult && accountResult.token) {
+                    console.log('✅ [OAuth Debug] Login successful with existing user data from Clerk');
+                    setIsNavigating(true);
+                    setTimeout(() => {
+                      navigation.navigate('MainTabs');
+                      setTimeout(() => cleanupOAuthState(), 1000);
+                    }, 500);
+                    return;
+                  }
+                } else {
+                  console.log('⚠️ [Database Debug] No user found in database for Clerk email:', email);
+                  console.log('🔍 [Database Debug] Response details (Clerk):', findUserResult);
+                }
+              } else {
+                console.log('❌ [Database Debug] Find user request failed (Clerk) with status:', findUserResponse.status);
+              }
+            } else {
+              console.log('⚠️ [OAuth Debug] No email found in Clerk user data');
+            }
           } else {
-            console.log('⚠️ [OAuth Debug] clerkUser.reload not available');
+            console.log('⚠️ [OAuth Debug] Clerk user still not populated after reload');
           }
         } catch (error) {
-          console.warn('⚠️ [OAuth Debug] Failed to reload Clerk user data:', error);
+          console.log('⚠️ [OAuth Debug] Error getting user data from Clerk session:', error);
         }
-        
-        // Force check for Clerk user data after session activation
-        let attempts = 0;
-        let currentClerkUser = clerkUser;
-        console.log('🔍 [OAuth Debug] Starting Clerk user data wait loop...');
         
         while (!currentClerkUser?.id && attempts < 10) {
-          console.log(`⏳ [OAuth Debug] Waiting for Clerk user data, attempt ${attempts + 1}/10`);
-          console.log(`🔍 [OAuth Debug] Current attempt clerkUser:`, currentClerkUser);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          currentClerkUser = clerkUser;
-          attempts++;
+          try {
+            console.log(`🔍 [OAuth Debug] Attempt ${attempts + 1}/10 to get Clerk user data...`);
+            
+            // Try to get current user from Clerk immediately
+            if (clerkUser?.reload) {
+              console.log('🔍 [OAuth Debug] Immediately reloading clerkUser...');
+              await clerkUser.reload();
+            }
+            
+            // Try to get user from Clerk's current session using the correct method
+            try {
+              // In @clerk/clerk-expo, we need to use the useUser hook's user object
+              // Let's try to force a refresh and wait for the hook to update
+              if (clerkUser?.id) {
+                currentClerkUser = clerkUser;
+                console.log('✅ [OAuth Debug] Got current user from clerkUser hook:', clerkUser.id);
+                console.log('🔍 [OAuth Debug] - email:', clerkUser.primaryEmailAddress?.emailAddress);
+                console.log('🔍 [OAuth Debug] - firstName:', clerkUser.firstName);
+                console.log('🔍 [OAuth Debug] - lastName:', clerkUser.lastName);
+                break;
+              } else {
+                console.log('⚠️ [OAuth Debug] clerkUser hook still not populated');
+              }
+            } catch (clerkError) {
+              console.warn('⚠️ [OAuth Debug] Error accessing clerkUser:', clerkError);
+            }
+            
+            // Fallback to component state
+            currentClerkUser = clerkUser;
+            console.log('🔍 [OAuth Debug] Fallback to component state clerkUser:', currentClerkUser?.id ? 'Available' : 'Not Available');
+            
+            if (!currentClerkUser?.id) {
+              console.log('🔍 [OAuth Debug] Waiting 200ms before next attempt...');
+              await new Promise(resolve => setTimeout(resolve, 200));
+              attempts++;
+            }
+          } catch (error) {
+            console.warn('⚠️ [OAuth Debug] Attempt', attempts + 1, 'failed to get Clerk user data:', error);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            attempts++;
+          }
         }
         
-        console.log('🔍 [OAuth Debug] After wait loop - Final Clerk User State:');
-        console.log('🔍 [OAuth Debug] - currentClerkUser:', currentClerkUser);
-        console.log('🔍 [OAuth Debug] - currentClerkUser.id:', currentClerkUser?.id);
-        console.log('🔍 [OAuth Debug] - currentClerkUser.firstName:', currentClerkUser?.firstName);
-        console.log('🔍 [OAuth Debug] - currentClerkUser.lastName:', currentClerkUser?.lastName);
-        console.log('🔍 [OAuth Debug] - currentClerkUser.primaryEmailAddress:', currentClerkUser?.primaryEmailAddress);
-        console.log('🔍 [OAuth Debug] - currentClerkUser.emailAddresses:', currentClerkUser?.emailAddresses);
+        console.log('🔍 [OAuth Debug] Final Clerk User State:');
+        console.log('🔍 [OAuth Debug] - clerkUser:', currentClerkUser?.id ? 'Available' : 'Not Available');
+        console.log('🔍 [OAuth Debug] - clerkId:', currentClerkUser?.id);
+        console.log('🔍 [OAuth Debug] - email:', currentClerkUser?.primaryEmailAddress?.emailAddress);
+        console.log('🔍 [OAuth Debug] - firstName:', currentClerkUser?.firstName);
+        console.log('🔍 [OAuth Debug] - lastName:', currentClerkUser?.lastName);
         
-        // Check if we have user data in the OAuth result (which we saw in the logs)
+        // Check if we have user data in the OAuth result
+        console.log('🔍 [OAuth Debug] Checking OAuth result data...');
+        console.log('🔍 [OAuth Debug] - signUp data:', oauthResultData?.signUp);
+        console.log('🔍 [OAuth Debug] - signIn data:', oauthResultData?.signIn);
+        console.log('🔍 [OAuth Debug] - signIn.userData keys:', oauthResultData?.signIn?.userData ? Object.keys(oauthResultData.signIn.userData) : 'No userData');
+        console.log('🔍 [OAuth Debug] - signUp keys:', oauthResultData?.signUp ? Object.keys(oauthResultData.signUp) : 'No signUp');
+        console.log('🔍 [OAuth Debug] - signIn keys:', oauthResultData?.signIn ? Object.keys(oauthResultData.signIn) : 'No signIn');
+        
         if (oauthResultData && oauthResultData.signUp) {
-          console.log('🔍 [OAuth Debug] Found user data in OAuth result:');
-          console.log('🔍 [OAuth Debug] - signUp data:', oauthResultData.signUp);
-          
           const signUpData = oauthResultData.signUp;
-          if (signUpData.emailAddress && signUpData.firstName && signUpData.lastName) {
-            console.log('✅ [OAuth Debug] Complete user data found in OAuth result!');
+          const hasAnyUserData = signUpData.emailAddress || signUpData.firstName || signUpData.lastName;
+          
+          if (hasAnyUserData) {
+            console.log('✅ [OAuth Debug] OAuth Result Data:');
             console.log('🔍 [OAuth Debug] - email:', signUpData.emailAddress);
             console.log('🔍 [OAuth Debug] - firstName:', signUpData.firstName);
             console.log('🔍 [OAuth Debug] - lastName:', signUpData.lastName);
             console.log('🔍 [OAuth Debug] - createdUserId:', signUpData.createdUserId);
             
-            // Create user account directly with OAuth result data
+            // Try to create user account with available data
             try {
               const userData = {
                 clerkId: signUpData.createdUserId || sessionId,
-                email: signUpData.emailAddress,
-                firstName: signUpData.firstName,
-                lastName: signUpData.lastName,
+                email: signUpData.emailAddress || 'user@example.com',
+                firstName: signUpData.firstName || 'User',
+                lastName: signUpData.lastName || 'Name',
                 isNewUser: true
               };
-              
-              console.log('🔍 [OAuth Debug] Creating user account with OAuth result data:');
-              console.log('🔍 [OAuth Debug]', JSON.stringify(userData, null, 2));
               
               const accountResult = await createUserAccount(userData, oauthProvider);
               
               if (accountResult && accountResult.token) {
-                console.log('✅ [OAuth Debug] User creation successful with OAuth data');
+                console.log('✅ [OAuth Debug] User account result:');
+                console.log('🔍 [OAuth Debug] - userExists:', accountResult.userExists);
+                console.log('🔍 [OAuth Debug] - message:', accountResult.message);
+                console.log('🔍 [OAuth Debug] - userId:', accountResult.user?._id || accountResult.userId);
                 
-                // Check if this is a new user and navigate accordingly
-                if (userData.isNewUser) {
-                  console.log('🔍 [OAuth Debug] New user detected, navigating to Welcome screen');
+                if (accountResult.userExists) {
+                  console.log('🔍 [OAuth Debug] Existing user detected, navigating to MainTabs');
                   setIsNavigating(true);
-                  // Keep loading screen visible during navigation
                   setTimeout(() => {
-                    navigation.navigate('Welcome');
-                    // Clean up OAuth state after navigation
+                    navigation.navigate('MainTabs');
                     setTimeout(() => cleanupOAuthState(), 1000);
                   }, 500);
                 } else {
-                  console.log('🔍 [OAuth Debug] Existing user detected, navigating to MainTabs');
+                  console.log('🔍 [OAuth Debug] New user detected, navigating to Welcome screen');
                   setIsNavigating(true);
-                  // Keep loading screen visible during navigation
                   setTimeout(() => {
-                    navigation.navigate('MainTabs');
-                    // Clean up OAuth state after navigation
+                    navigation.navigate('Welcome');
                     setTimeout(() => cleanupOAuthState(), 1000);
                   }, 500);
                 }
                 return;
-              } else {
-                console.error('❌ [OAuth Debug] createUserAccount failed with OAuth data:', accountResult);
               }
             } catch (error) {
               console.error('❌ [OAuth Debug] Error creating user with OAuth data:', error);
@@ -634,10 +890,275 @@ const PhoneNumberScreen = ({ navigation }) => {
           }
         }
         
+        // Also check signIn data for existing users
+        if (oauthResultData && oauthResultData.signIn && oauthResultData.signIn.userData) {
+          console.log('✅ [OAuth Debug] Found signIn user data for existing user');
+          const signInData = oauthResultData.signIn.userData;
+          console.log('🔍 [OAuth Debug] - email:', signInData.email);
+          console.log('🔍 [OAuth Debug] - firstName:', signInData.firstName);
+          console.log('🔍 [OAuth Debug] - lastName:', signInData.lastName);
+          
+          // Try to find existing user by email
+          if (signInData.email) {
+            try {
+              const findUserResponse = await fetch(`${API_BASE_URL}/auth/find-user-by-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  email: signInData.email,
+                  provider: oauthProvider
+                }),
+              });
+              
+              if (findUserResponse.ok) {
+                const findUserResult = await findUserResponse.json();
+                console.log('🔍 [Database Debug] Find user response (signIn):', findUserResult);
+                
+                if (findUserResult.success && findUserResult.user) {
+                  console.log('✅ [OAuth Debug] Found existing user by email from signIn data');
+                  console.log('🔍 [Database Debug] User details from database (signIn):');
+                  console.log('🔍 [Database Debug] - userId:', findUserResult.user._id);
+                  console.log('🔍 [Database Debug] - clerkId:', findUserResult.user.clerkId);
+                  console.log('🔍 [Database Debug] - email:', findUserResult.user.email);
+                  console.log('🔍 [Database Debug] - firstName:', findUserResult.user.firstname);
+                  console.log('🔍 [Database Debug] - lastName:', findUserResult.user.lastname);
+                  console.log('🔍 [Database Debug] - socialProvider:', findUserResult.user.socialProvider);
+                  
+                  // Try to login with existing user data
+                  const userData = {
+                    clerkId: findUserResult.user.clerkId || currentClerkUser?.id || sessionId,
+                    email: signInData.email,
+                    firstName: signInData.firstName || findUserResult.user.firstname,
+                    lastName: signInData.lastName || findUserResult.user.lastname,
+                    isNewUser: false
+                  };
+                  
+                  console.log('🔍 [Database Debug] Login attempt with user data (signIn):', userData);
+                  
+                  const accountResult = await createUserAccount(userData, oauthProvider);
+                  
+                  if (accountResult && accountResult.token) {
+                    console.log('✅ [OAuth Debug] Login successful with existing user data from signIn');
+                    setIsNavigating(true);
+                    setTimeout(() => {
+                      navigation.navigate('MainTabs');
+                      setTimeout(() => cleanupOAuthState(), 1000);
+                    }, 500);
+                    return;
+                  }
+                } else {
+                  console.log('⚠️ [Database Debug] No user found in database for signIn email:', signInData.email);
+                  console.log('🔍 [Database Debug] Response details (signIn):', findUserResult);
+                }
+              } else {
+                console.log('❌ [Database Debug] Find user request failed (signIn) with status:', findUserResponse.status);
+                try {
+                  const errorResponse = await findUserResponse.text();
+                  console.log('🔍 [Database Debug] Error response body (signIn):', errorResponse);
+                } catch (e) {
+                  console.log('🔍 [Database Debug] Could not read error response body (signIn)');
+                }
+              }
+            } catch (error) {
+              console.error('❌ [OAuth Debug] Error finding existing user by signIn email:', error);
+            }
+          }
+        }
+        
         if (!currentClerkUser?.id) {
-          console.error('❌ [OAuth Debug] Failed to get Clerk user data after OAuth');
-          Alert.alert('Authentication Error', 'Failed to retrieve your Google profile. Please try again.');
-          cleanupOAuthState();
+          // console.error('❌ [OAuth Debug] Failed to get Clerk user data after OAuth');
+          
+          // Show OAuth error modal instead of just logging
+          showOAuthError(
+            'Authentication Issue',
+            'We encountered an issue retrieving your Google profile data. This usually resolves itself - please try signing in again.',
+            oauthProvider
+          );
+          
+          // Try to get existing user data from backend using email from OAuth result
+          if (oauthResultData && oauthResultData.signUp && oauthResultData.signUp.emailAddress) {
+            const email = oauthResultData.signUp.emailAddress;
+            console.log('🔍 [OAuth Debug] Attempting to find existing user by email:', email);
+            
+            try {
+              // Try to find existing user by email
+              const findUserResponse = await fetch(`${API_BASE_URL}/auth/find-user-by-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  email: email,
+                  provider: oauthProvider
+                }),
+              });
+              
+              console.log('🔍 [OAuth Debug] Find user response status:', findUserResponse.status);
+              
+              if (findUserResponse.ok) {
+                const findUserResult = await findUserResponse.json();
+                console.log('🔍 [Database Debug] Find user response (signUp):', findUserResult);
+                console.log('✅ [OAuth Debug] Database query result:');
+                console.log('🔍 [OAuth Debug] - success:', findUserResult.success);
+                console.log('🔍 [OAuth Debug] - message:', findUserResult.message);
+                
+                if (findUserResult.success && findUserResult.user) {
+                  console.log('🔍 [Database Debug] User details from database (signUp):');
+                  console.log('🔍 [Database Debug] - userId:', findUserResult.user._id);
+                  console.log('🔍 [Database Debug] - clerkId:', findUserResult.user.clerkId);
+                  console.log('🔍 [Database Debug] - email:', findUserResult.user.email);
+                  console.log('🔍 [Database Debug] - firstName:', findUserResult.user.firstname);
+                  console.log('🔍 [Database Debug] - lastName:', findUserResult.user.lastname);
+                  console.log('🔍 [Database Debug] - socialProvider:', findUserResult.user.socialProvider);
+                  
+                  if (findUserResult.user.clerkId) {
+                    console.log('✅ [OAuth Debug] Using existing user Clerk ID:', findUserResult.user.clerkId);
+                    
+                    // Try to login with existing user data
+                    const userData = {
+                      clerkId: findUserResult.user.clerkId,
+                      email: email,
+                      firstName: signUpData.firstName || findUserResult.user.firstname,
+                      lastName: signUpData.lastName || findUserResult.user.lastname,
+                      isNewUser: false
+                    };
+                    
+                    console.log('🔍 [Database Debug] Login attempt with user data (signUp):', userData);
+                    
+                    const accountResult = await createUserAccount(userData, oauthProvider);
+                    
+                    if (accountResult && accountResult.token) {
+                      console.log('✅ [OAuth Debug] Login successful with existing user data');
+                      setIsNavigating(true);
+                      setTimeout(() => {
+                        navigation.navigate('MainTabs');
+                        setTimeout(() => cleanupOAuthState(), 1000);
+                      }, 500);
+                      return;
+                    }
+                  }
+                } else {
+                  console.log('⚠️ [Database Debug] No user found in database for signUp email:', email);
+                  console.log('🔍 [Database Debug] Response details (signUp):', findUserResult);
+                }
+              } else {
+                console.log('❌ [Database Debug] Find user request failed (signUp) with status:', findUserResponse.status);
+                try {
+                  const errorResponse = await findUserResponse.text();
+                  console.log('🔍 [Database Debug] Error response body (signUp):', errorResponse);
+                } catch (e) {
+                  console.log('🔍 [Database Debug] Could not read error response body (signUp)');
+                }
+              }
+            } catch (error) {
+              console.error('❌ [OAuth Debug] Error finding existing user by email:', error);
+            }
+          } else {
+            console.log('⚠️ [OAuth Debug] No email in OAuth result, cannot perform email lookup');
+            console.log('🔍 [OAuth Debug] OAuth result structure:', {
+              hasSignUp: !!oauthResultData?.signUp,
+              hasSignIn: !!oauthResultData?.signIn,
+              signUpKeys: oauthResultData?.signUp ? Object.keys(oauthResultData.signUp) : [],
+              signInKeys: oauthResultData?.signIn ? Object.keys(oauthResultData.signIn) : []
+            });
+            
+            // Try to extract email from other sources
+            let extractedEmail = null;
+            if (oauthResultData?.signIn?.userData?.email) {
+              extractedEmail = oauthResultData.signIn.userData.email;
+              console.log('🔍 [OAuth Debug] Found email in signIn.userData:', extractedEmail);
+            } else if (oauthResultData?.signUp?.emailAddress) {
+              extractedEmail = oauthResultData.signUp.emailAddress;
+              console.log('🔍 [OAuth Debug] Found email in signUp.emailAddress:', extractedEmail);
+            } else if (oauthResultData?.signIn?.identifier) {
+              extractedEmail = oauthResultData.signIn.identifier;
+              console.log('🔍 [OAuth Debug] Found email in signIn.identifier:', extractedEmail);
+            }
+            
+            if (extractedEmail) {
+              console.log('🔍 [OAuth Debug] Attempting to find existing user by extracted email:', extractedEmail);
+              
+              try {
+                const findUserResponse = await fetch(`${API_BASE_URL}/auth/find-user-by-email`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    email: extractedEmail,
+                    provider: oauthProvider
+                  }),
+                });
+                
+                console.log('🔍 [OAuth Debug] Find user response status:', findUserResponse.status);
+                
+                if (findUserResponse.ok) {
+                  const findUserResult = await findUserResponse.json();
+                  console.log('🔍 [Database Debug] Find user response (extracted email):', findUserResult);
+                  console.log('✅ [OAuth Debug] Database query result with extracted email:');
+                  console.log('🔍 [OAuth Debug] - success:', findUserResult.success);
+                  console.log('🔍 [OAuth Debug] - message:', findUserResult.message);
+                  
+                  if (findUserResult.success && findUserResult.user) {
+                    console.log('🔍 [Database Debug] User details from database (extracted email):');
+                    console.log('🔍 [Database Debug] - userId:', findUserResult.user._id);
+                    console.log('🔍 [Database Debug] - clerkId:', findUserResult.user.clerkId);
+                    console.log('🔍 [Database Debug] - email:', findUserResult.user.email);
+                    console.log('🔍 [Database Debug] - firstName:', findUserResult.user.firstname);
+                    console.log('🔍 [Database Debug] - lastName:', findUserResult.user.lastname);
+                    console.log('🔍 [Database Debug] - socialProvider:', findUserResult.user.socialProvider);
+                    
+                    if (findUserResult.user.clerkId) {
+                      console.log('✅ [OAuth Debug] Using existing user Clerk ID from extracted email:', findUserResult.user.clerkId);
+                      
+                      // Try to login with existing user data
+                      const userData = {
+                        clerkId: findUserResult.user.clerkId,
+                        email: extractedEmail,
+                        firstName: oauthResultData?.signUp?.firstName || findUserResult.user.firstname,
+                        lastName: oauthResultData?.signUp?.lastName || findUserResult.user.lastname,
+                        isNewUser: false
+                      };
+                      
+                      console.log('🔍 [Database Debug] Login attempt with user data (extracted email):', userData);
+                      
+                      const accountResult = await createUserAccount(userData, oauthProvider);
+                      
+                      if (accountResult && accountResult.token) {
+                        console.log('✅ [OAuth Debug] Login successful with existing user data from extracted email');
+                        setIsNavigating(true);
+                        setTimeout(() => {
+                          navigation.navigate('MainTabs');
+                          setTimeout(() => cleanupOAuthState(), 1000);
+                        }, 500);
+                        return;
+                      }
+                    }
+                  } else {
+                    console.log('⚠️ [Database Debug] No user found in database for extracted email:', extractedEmail);
+                    console.log('🔍 [Database Debug] Response details (extracted email):', findUserResult);
+                  }
+                } else {
+                  console.log('❌ [Database Debug] Find user request failed (extracted email) with status:', findUserResponse.status);
+                  try {
+                    const errorResponse = await findUserResponse.text();
+                    console.log('🔍 [Database Debug] Error response body (extracted email):', errorResponse);
+                  } catch (e) {
+                    console.log('🔍 [Database Debug] Could not read error response body (extracted email)');
+                  }
+                }
+              } catch (error) {
+                console.error('❌ [OAuth Debug] Error finding existing user by extracted email:', error);
+              }
+            }
+          }
+        }
+        
+        // If no email found in OAuth result, show error and stop
+        if (!oauthResultData?.signUp?.emailAddress && !oauthResultData?.signIn?.userData?.email) {
+           cleanupOAuthState();
           return;
         }
         
@@ -646,65 +1167,48 @@ const PhoneNumberScreen = ({ navigation }) => {
         if (token && userId) {
           console.log('[Signup] Found existing credentials after OAuth, navigating to MainTabs');
           setIsNavigating(true);
-          // Keep loading screen visible during navigation
           setTimeout(() => {
             setIsNavigating(true);
             navigation.navigate('MainTabs');
-            // Clean up OAuth state after navigation
             setTimeout(() => cleanupOAuthState(), 1000);
           }, 500);
           return;
         }
         
         // Try to get Clerk ID and attempt existing user sign in
-        const clerkId = clerkUser?.id;
+        const clerkId = clerkUser?.id || sessionId;
         if (clerkId) {
           console.log('[Signup] Attempting existing user sign in with Clerk ID:', clerkId);
-          const success = await handleExistingUserSignIn(clerkUser, oauthProvider, clerkId);
-          if (success) {
-            console.log('[Signup] Existing user sign in successful after OAuth');
-            return;
+          
+          try {
+            console.log('[Signup] Attempting social login for existing user...');
+            const success = await handleExistingUserSignIn(clerkUser, oauthProvider, clerkId);
+            if (success) {
+              console.log('[Signup] Existing user sign in successful after OAuth');
+              return;
+            }
+          } catch (error) {
+            console.warn('[Signup] Social login attempt failed, user may not exist:', error);
           }
         }
         
         // If no existing user, try to create one
         if (clerkUser) {
-          console.log('🔍 [OAuth Debug] ===== User Creation Started =====');
           console.log('🔍 [OAuth Debug] No existing user found, attempting user creation...');
           
           // Wait for Clerk to fully populate user data
           let attempts = 0;
           let userDataComplete = false;
-          console.log('🔍 [OAuth Debug] Starting user data validation loop...');
           
           while (!userDataComplete && attempts < 10) {
-            console.log(`⏳ [OAuth Debug] Waiting for complete Clerk user data, attempt ${attempts + 1}/10`);
-            
             const email = clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress;
             const firstName = clerkUser.firstName;
             const lastName = clerkUser.lastName;
-            
-            console.log('🔍 [OAuth Debug] Current user data check:');
-            console.log('🔍 [OAuth Debug] - email:', email);
-            console.log('🔍 [OAuth Debug] - firstName:', firstName);
-            console.log('🔍 [OAuth Debug] - lastName:', lastName);
-            console.log('🔍 [OAuth Debug] - clerkId:', clerkUser.id);
-            console.log('🔍 [OAuth Debug] - email type:', typeof email);
-            console.log('🔍 [OAuth Debug] - firstName type:', typeof firstName);
-            console.log('🔍 [OAuth Debug] - lastName type:', typeof lastName);
-            console.log('🔍 [OAuth Debug] - email length:', email ? email.length : 'undefined');
-            console.log('🔍 [OAuth Debug] - firstName length:', firstName ? firstName.length : 'undefined');
-            console.log('🔍 [OAuth Debug] - lastName length:', lastName ? lastName.length : 'undefined');
             
             if (email && firstName && lastName) {
               userDataComplete = true;
               console.log('✅ [OAuth Debug] Complete user data received:', { email, firstName, lastName });
             } else {
-              console.log('⚠️ [OAuth Debug] Incomplete user data, waiting...');
-              console.log('🔍 [OAuth Debug] Missing data:');
-              if (!email) console.log('  - email is missing');
-              if (!firstName) console.log('  - firstName is missing');
-              if (!lastName) console.log('  - lastName is missing');
               await new Promise(resolve => setTimeout(resolve, 500));
               attempts++;
             }
@@ -712,14 +1216,11 @@ const PhoneNumberScreen = ({ navigation }) => {
           
           if (!userDataComplete) {
             console.error('❌ [OAuth Debug] Failed to get complete user data after OAuth');
-            console.error('🔍 [OAuth Debug] Final attempt data:');
-            const finalEmail = clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress;
-            const finalFirstName = clerkUser.firstName;
-            const finalLastName = clerkUser.lastName;
-            console.error('🔍 [OAuth Debug] - email:', finalEmail);
-            console.error('🔍 [OAuth Debug] - firstName:', finalFirstName);
-            console.error('🔍 [OAuth Debug] - lastName:', finalLastName);
-            Alert.alert('Profile Data Error', 'Unable to retrieve your Google profile information. Please try again or use phone number signup.');
+            showOAuthError(
+              'Profile Data Error',
+              'We were unable to retrieve your Google profile information. This usually resolves itself - please try signing in again.',
+              oauthProvider
+            );
             cleanupOAuthState();
             return;
           }
@@ -728,13 +1229,6 @@ const PhoneNumberScreen = ({ navigation }) => {
             const email = clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress;
             const firstName = clerkUser.firstName;
             const lastName = clerkUser.lastName;
-            
-            console.log('🔍 [OAuth Debug] ===== Preparing User Data for Backend =====');
-            console.log('🔍 [OAuth Debug] Final user data before account creation:');
-            console.log('🔍 [OAuth Debug] - email:', email);
-            console.log('🔍 [OAuth Debug] - firstName:', firstName);
-            console.log('🔍 [OAuth Debug] - lastName:', lastName);
-            console.log('🔍 [OAuth Debug] - clerkId:', clerkUser.id);
             
             if (email && firstName && lastName) {
               const userData = {
@@ -745,55 +1239,39 @@ const PhoneNumberScreen = ({ navigation }) => {
                 isNewUser: true
               };
               
-              console.log('🔍 [OAuth Debug] User data object being sent to backend:');
-              console.log('🔍 [OAuth Debug]', JSON.stringify(userData, null, 2));
-              
-              console.log('🔍 [OAuth Debug] Calling createUserAccount...');
               const accountResult = await createUserAccount(userData, oauthProvider);
-              
-              console.log('🔍 [OAuth Debug] createUserAccount result:');
-              console.log('🔍 [OAuth Debug]', accountResult);
               
               if (accountResult && accountResult.token) {
                 console.log('✅ [OAuth Debug] User creation successful after OAuth');
+                console.log('🔍 [OAuth Debug] - userExists:', accountResult.userExists);
+                console.log('🔍 [OAuth Debug] - message:', accountResult.message);
+                console.log('🔍 [OAuth Debug] - userId:', accountResult.user?._id || accountResult.userId);
                 
-                // Check if this is a new user and navigate accordingly
-                if (userData.isNewUser) {
-                  console.log('🔍 [OAuth Debug] New user detected, navigating to Welcome screen');
+                if (accountResult.userExists) {
+                  console.log('🔍 [OAuth Debug] Existing user detected, navigating to MainTabs');
                   setIsNavigating(true);
-                  // Keep loading screen visible during navigation
                   setTimeout(() => {
-                    navigation.navigate('Welcome');
-                    // Clean up OAuth state after navigation
+                    navigation.navigate('MainTabs');
                     setTimeout(() => cleanupOAuthState(), 1000);
                   }, 500);
                 } else {
-                  console.log('🔍 [OAuth Debug] Existing user detected, navigating to MainTabs');
+                  console.log('🔍 [OAuth Debug] New user detected, navigating to Welcome screen');
                   setIsNavigating(true);
-                  // Keep loading screen visible during navigation
                   setTimeout(() => {
-                    navigation.navigate('MainTabs');
-                    // Clean up OAuth state after navigation
+                    navigation.navigate('Welcome');
                     setTimeout(() => cleanupOAuthState(), 1000);
                   }, 500);
                 }
                 return;
-              } else {
-                console.error('❌ [OAuth Debug] createUserAccount returned invalid result:', accountResult);
               }
             } else {
-              console.error('❌ [OAuth Debug] Missing required user data after validation:');
-              console.error('🔍 [OAuth Debug] - email:', email);
-              console.error('🔍 [OAuth Debug] - firstName:', firstName);
-              console.error('🔍 [OAuth Debug] - lastName:', lastName);
+              console.error('❌ [OAuth Debug] Missing required user data after validation');
               Alert.alert('Profile Data Error', 'Unable to retrieve your Google profile information. Please try again or use phone number signup.');
               cleanupOAuthState();
               return;
             }
           } catch (error) {
             console.error('❌ [OAuth Debug] User creation failed after OAuth:', error);
-            console.error('🔍 [OAuth Debug] Error details:', error.message);
-            console.error('🔍 [OAuth Debug] Error stack:', error.stack);
             Alert.alert('Account Creation Failed', 'Failed to create your account. Please try again or use phone number signup.');
             cleanupOAuthState();
             return;
@@ -801,6 +1279,7 @@ const PhoneNumberScreen = ({ navigation }) => {
         }
         
         // If all else fails, attempt auto-login as fallback
+        try {
         console.log('[Signup] Attempting auto-login as fallback...');
         const success = await attemptAutoLogin(oauthProvider);
         if (success) {
@@ -810,18 +1289,18 @@ const PhoneNumberScreen = ({ navigation }) => {
         
         // If auto-login fails, the useEffect monitoring auth state should handle it
         console.log('[Signup] Auto-login failed, waiting for auth state monitoring...');
+      } catch (error) {
+        console.error('[Signup] Error processing OAuth callback:', error);
+        cleanupOAuthState();
+        Alert.alert('Error', 'Failed to process authentication. Please try again.');
+        }
       }
-      
-      // Reset progress flags to allow auto-navigation useEffect to work
-      setIsOAuthInProgress(false);
-      setIsSocialLoginInProgress(false);
-      
     } catch (error) {
-      console.error('[Signup] Error processing OAuth callback:', error);
+      console.error('[Signup] Error in handleOAuthCallback:', error);
       cleanupOAuthState();
-      Alert.alert('Error', 'Failed to process authentication. Please try again.');
-    }
-  };
+      Alert.alert('Error', 'An unexpected error occurred during authentication. Please try again.');
+      }
+    };
 
   // Handle OAuth callback that might come from App.js deep link handler
   const handleExternalOAuthCallback = async (url) => {
@@ -848,6 +1327,57 @@ const PhoneNumberScreen = ({ navigation }) => {
     setOauthResultData(null);
     setIsSocialLoginInProgress(false);
     setIsOAuthInProgress(false);
+  };
+
+  // Handle OAuth error modal
+  const showOAuthError = (title, subtitle, provider = 'google') => {
+    setOauthErrorDetails({
+      title: title || 'OAuth Error',
+      subtitle: subtitle || 'There was an issue with the authentication process. Please try again.',
+      provider: provider
+    });
+    setShowOAuthErrorModal(true);
+  };
+
+  const hideOAuthError = () => {
+    setShowOAuthErrorModal(false);
+    setOauthErrorDetails({});
+  };
+
+  const retryOAuth = () => {
+    hideOAuthError();
+    
+    // Trigger immediate refresh before retrying
+    immediateRefreshUserData().then(() => {
+      // Trigger the same OAuth flow again after refresh
+      handleSocialLogin(oauthErrorDetails.provider || 'google');
+    });
+  };
+
+  // Immediate refresh function for faster OAuth response
+  const immediateRefreshUserData = async () => {
+    try {
+      console.log('🔍 [OAuth Debug] Starting immediate user data refresh...');
+      
+      // Force reload user data immediately
+      if (clerkUser?.reload) {
+        console.log('🔍 [OAuth Debug] Immediately reloading user data...');
+        await clerkUser.reload();
+      }
+      
+      // Force a re-render by updating state
+      setIsSocialLoginInProgress(false);
+      setIsOAuthInProgress(false);
+      
+      // Wait minimal time for state to update
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log('✅ [OAuth Debug] Immediate refresh completed');
+      return true;
+    } catch (error) {
+      console.warn('⚠️ [OAuth Debug] Immediate refresh failed:', error);
+      return false;
+    }
   };
 
   // Wait for local credentials (token + userId) to appear in AsyncStorage
@@ -890,8 +1420,12 @@ const PhoneNumberScreen = ({ navigation }) => {
       timeoutId = setTimeout(() => {
         console.warn('[Signup] OAuth WebView timeout reached, cleaning up...');
         cleanupOAuthState();
-        Alert.alert('Timeout', 'OAuth authentication is taking too long. Please try again.');
-      }, 30000); // 30 second timeout for WebView
+        showOAuthError(
+          'Authentication Timeout',
+          'The authentication process is taking longer than expected. Please try signing in again.',
+          oauthProvider
+        );
+      }, 15000); // Reduced to 15 second timeout for WebView
     }
     
     return () => {
@@ -904,19 +1438,36 @@ const PhoneNumberScreen = ({ navigation }) => {
   // Enhanced createUserAccount function
   const createUserAccount = async (userData, provider) => {
     try {
-      console.log('🔍 [createUserAccount Debug] ===== createUserAccount Started =====');
-      console.log('🔍 [createUserAccount Debug] Input userData:', JSON.stringify(userData, null, 2));
-      console.log('🔍 [createUserAccount Debug] Provider:', provider);
+      console.log('�� [createUserAccount] Started');
+      console.log('🔍 [createUserAccount] Input:', {
+        clerkId: userData.clerkId,
+        email: userData.email,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        provider: provider
+      });
       
       // Validate minimum required data
       if (!userData.clerkId) {
-        console.error('❌ [createUserAccount Debug] Clerk ID is missing');
+        console.error('❌ [createUserAccount] Clerk ID is missing');
         throw new Error('Clerk ID is required');
       }
       
+      // Email is required but we can use a fallback if not provided
       if (!userData.email) {
-        console.error('❌ [createUserAccount Debug] Email is missing');
-        throw new Error('Email address is required');
+        console.warn('⚠️ [createUserAccount] Email address is missing, using fallback');
+        userData.email = 'user@example.com'; // Fallback email
+      }
+      
+      // Ensure firstName and lastName have fallbacks
+      if (!userData.firstName) {
+        console.warn('⚠️ [createUserAccount] First name is missing, using fallback');
+        userData.firstName = 'User';
+      }
+      
+      if (!userData.lastName) {
+        console.warn('⚠️ [createUserAccount] Last name is missing, using fallback');
+        userData.lastName = 'Name';
       }
       
       const requestBody = {
@@ -928,22 +1479,13 @@ const PhoneNumberScreen = ({ navigation }) => {
       // Add optional fields if available
       if (userData.firstName) {
         requestBody.firstName = userData.firstName;
-        console.log('✅ [createUserAccount Debug] firstName added:', userData.firstName);
-      } else {
-        console.log('⚠️ [createUserAccount Debug] firstName is missing');
       }
       
       if (userData.lastName) {
         requestBody.lastName = userData.lastName;
-        console.log('✅ [createUserAccount Debug] lastName added:', userData.lastName);
-      } else {
-        console.log('⚠️ [createUserAccount Debug] lastName is missing');
       }
       
-      console.log('🔍 [createUserAccount Debug] Final requestBody being sent to backend:');
-      console.log('🔍 [createUserAccount Debug]', JSON.stringify(requestBody, null, 2));
-      
-      console.log('🔍 [createUserAccount Debug] Making request to:', `${API_BASE_URL}/auth/create-social-user`);
+      console.log('🔍 [createUserAccount] Making request to backend...');
       
       const response = await fetch(`${API_BASE_URL}/auth/create-social-user`, {
         method: 'POST',
@@ -953,41 +1495,77 @@ const PhoneNumberScreen = ({ navigation }) => {
         body: JSON.stringify(requestBody),
       });
 
-      console.log('🔍 [createUserAccount Debug] Response status:', response.status);
-      console.log('🔍 [createUserAccount Debug] Response headers:', response.headers);
+      console.log('🔍 [createUserAccount] Response status:', response.status);
 
       let result;
       try {
         result = await response.json();
-        console.log('🔍 [createUserAccount Debug] Response body:', JSON.stringify(result, null, 2));
+        console.log('🔍 [createUserAccount] Backend response:');
+        console.log('🔍 [createUserAccount] - message:', result.message);
+        console.log('🔍 [createUserAccount] - token present:', !!result.token);
+        console.log('🔍 [createUserAccount] - user ID:', result.user?._id);
+        console.log('🔍 [createUserAccount] - clerk ID:', result.user?.clerkId);
+        console.log('🔍 [createUserAccount] - email:', result.user?.email);
+        console.log('🔍 [createUserAccount] - firstName:', result.user?.firstname);
+        console.log('🔍 [createUserAccount] - lastName:', result.user?.lastname);
+        console.log('🔍 [createUserAccount] - socialProvider:', result.user?.socialProvider);
+        console.log('🔍 [createUserAccount] - verificationStatus:', result.user?.verificationStatus);
       } catch (parseError) {
-        console.error('❌ [createUserAccount Debug] Failed to parse response as JSON:', parseError);
-        // If we can't parse JSON, treat it as an error
+        console.error('❌ [createUserAccount] Failed to parse response as JSON:', parseError);
         throw new Error('Invalid response from server');
       }
       
       if (response.ok) {
-        console.log('✅ [createUserAccount Debug] User account created successfully');
-        // Store both token and user ID for future use
-        await AsyncStorage.multiSet([
-          ['token', result.token],
-          ['userId', result.user?.id || result.userId || userData.clerkId]
-        ]);
-        
-        console.log('🔍 [createUserAccount Debug] Stored in AsyncStorage:');
-        console.log('🔍 [createUserAccount Debug] - token:', result.token ? 'present' : 'missing');
-        console.log('🔍 [createUserAccount Debug] - userId:', result.user?.id || result.userId || userData.clerkId);
-        
-        return result;
+        // Check if this is actually an existing user being updated
+        if (result.message && (result.message.includes('Existing user updated') || result.message.includes('already exists') || result.message.includes('duplicate'))) {
+          console.log('✅ [createUserAccount] Existing user updated successfully');
+          // Store both token and user ID for future use
+          await AsyncStorage.multiSet([
+            ['token', result.token],
+            ['userId', result.user?.id || result.userId || userData.clerkId]
+          ]);
+          
+          return { ...result, userExists: true };
+        } else if (result.user && result.user.phone && result.user.phone.startsWith('temp_')) {
+          // If the user has a temporary phone number, this is definitely a new user
+          console.log('✅ [createUserAccount] New user detected by temporary phone number');
+          // Store both token and user ID for future use
+          await AsyncStorage.multiSet([
+            ['token', result.token],
+            ['userId', result.user._id]
+          ]);
+          
+          return { ...result, userExists: false };
+        } else if (result.message && result.message.includes('User created successfully')) {
+          // If the message says "User created successfully", this is a new user
+          console.log('✅ [createUserAccount] New user detected by success message');
+          // Store both token and user ID for future use
+          await AsyncStorage.multiSet([
+            ['token', result.token],
+            ['userId', result.user?._id || result.userId || userData.clerkId]
+          ]);
+          
+          return { ...result, userExists: false };
+        } else {
+          // Default case - assume existing user if we can't determine
+          console.log('✅ [createUserAccount] Default case - assuming existing user');
+          // Store both token and user ID for future use
+          await AsyncStorage.multiSet([
+            ['token', result.token],
+            ['userId', result.user?._id || result.userId || userData.clerkId]
+          ]);
+          
+          return { ...result, userExists: true };
+        }
       } else {
-        console.error('❌ [createUserAccount Debug] Failed to create user account:', result);
+        console.error('❌ [createUserAccount] Failed to create user account:', result);
         
         // Check if user already exists
         if (result.error && (result.error.includes('already exists') || result.error.includes('duplicate'))) {
-          console.log('🔍 [createUserAccount Debug] User already exists, attempting login...');
+          console.log('🔍 [createUserAccount] User already exists, attempting login...');
           // If user exists, we should get a token back
           if (result.token) {
-            console.log('✅ [createUserAccount Debug] Token received for existing user');
+            console.log('✅ [createUserAccount] Token received for existing user');
             await AsyncStorage.multiSet([
               ['token', result.token],
               ['userId', result.user?.id || result.userId || userData.clerkId]
@@ -997,7 +1575,7 @@ const PhoneNumberScreen = ({ navigation }) => {
           
           // If no token but user exists, try to login
           try {
-            console.log('🔍 [createUserAccount Debug] Attempting social login for existing user...');
+            console.log('🔍 [createUserAccount] Attempting social login for existing user...');
             const loginResponse = await fetch(`${API_BASE_URL}/auth/social-login`, {
               method: 'POST',
               headers: {
@@ -1010,10 +1588,15 @@ const PhoneNumberScreen = ({ navigation }) => {
             });
             
             const loginResult = await loginResponse.json();
-            console.log('🔍 [createUserAccount Debug] Social login result:', JSON.stringify(loginResult, null, 2));
+            console.log('🔍 [createUserAccount] Social login result:', {
+              status: loginResponse.status,
+              success: loginResponse.ok,
+              hasToken: !!loginResult.token,
+              userId: loginResult.user?._id
+            });
             
             if (loginResponse.ok && loginResult.token) {
-              console.log('✅ [createUserAccount Debug] Social login successful');
+              console.log('✅ [createUserAccount] Social login successful');
               await AsyncStorage.multiSet([
                 ['token', loginResult.token],
                 ['userId', loginResult.user?.id || loginResult.userId || userData.clerkId]
@@ -1021,16 +1604,14 @@ const PhoneNumberScreen = ({ navigation }) => {
               return { ...loginResult, userExists: true };
             }
           } catch (loginError) {
-            console.error('❌ [createUserAccount Debug] Login attempt failed:', loginError);
+            console.error('❌ [createUserAccount] Login attempt failed:', loginError);
           }
         }
         
         throw new Error(result.error || result.message || 'Failed to create user account');
       }
     } catch (error) {
-      console.error('❌ [createUserAccount Debug] Error creating user account:', error);
-      console.error('🔍 [createUserAccount Debug] Error details:', error.message);
-      console.error('🔍 [createUserAccount Debug] Error stack:', error.stack);
+      console.error('❌ [createUserAccount] Error creating user account:', error);
       throw error;
     }
   };
@@ -1235,28 +1816,39 @@ const PhoneNumberScreen = ({ navigation }) => {
         }
       }
       
-      // Wait for Clerk to establish the session
-      if (!sessionEstablished) {
-        console.log('[Signup] Waiting for Clerk session to establish...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Check if user is now signed in
-        if (isSignedIn || clerkUser) {
-          sessionEstablished = true;
-          console.log('[Signup] Session established via Clerk state');
+              // Wait for Clerk to establish the session with better polling
+        if (!sessionEstablished) {
+          console.log('[Signup] Waiting for Clerk session to establish...');
+          
+          // Poll for session establishment with exponential backoff
+          let pollAttempts = 0;
+          const maxPollAttempts = 5;
+          
+          while (!sessionEstablished && pollAttempts < maxPollAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, pollAttempts)));
+            pollAttempts++;
+            
+            // Check if user is now signed in
+            if (isSignedIn || clerkUser) {
+              sessionEstablished = true;
+              console.log(`[Signup] Session established via Clerk state on attempt ${pollAttempts}`);
+              break;
+            }
+            
+            console.log(`[Signup] Session not yet established, attempt ${pollAttempts}/${maxPollAttempts}`);
+          }
         }
-      }
-      
-      // If still no session, try one more time with a longer wait
-      if (!sessionEstablished) {
-        console.log('[Signup] Final attempt to establish session...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
         
-        if (isSignedIn || clerkUser) {
-          sessionEstablished = true;
-          console.log('[Signup] Session established on final attempt');
+        // If still no session, try one more time with a longer wait
+        if (!sessionEstablished) {
+          console.log('[Signup] Final attempt to establish session...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          if (isSignedIn || clerkUser) {
+            sessionEstablished = true;
+            console.log('[Signup] Session established on final attempt');
+          }
         }
-      }
       
       // Final verification and user creation
       if (sessionEstablished || isSignedIn) {
@@ -1360,17 +1952,21 @@ const PhoneNumberScreen = ({ navigation }) => {
                       setIsNavigating(true);
                       navigation.navigate('MainTabs');
                     } else {
+                      // This is a new user signup - set the flag and navigate to Welcome
+                      await AsyncStorage.setItem('isNewSignup', 'true');
+                      console.log('🔍 [Social Login] Marked as new signup');
+                      
                       setIsSocialLoginInProgress(false);
                       setIsUserCreationInProgress(false);
                       
-                      // Navigate immediately to Welcome screen via Auth stack
+                      // Navigate immediately to Welcome screen via Onboarding stack
                       setIsNavigating(true);
-                      navigation.navigate('Auth', { screen: 'Welcome' });
+                      // Add a small delay to ensure navigation context is ready
+                      setTimeout(() => {
+                        navigation.navigate('Onboarding', { screen: 'Welcome' });
+                      }, 200);
                       
                       // Continue background processes without blocking navigation
-                      
-                      // Clear OAuth progress flag
-                      setIsOAuthInProgress(false);
                       
                       // Clear OAuth progress flag
                       setIsOAuthInProgress(false);
@@ -1820,7 +2416,6 @@ const PhoneNumberScreen = ({ navigation }) => {
       
       {/* OAuth WebView Modal */}
       <Modal visible={showOAuthWebView} animationType="slide">
-        {console.log('[Signup] WebView Modal visible:', showOAuthWebView, 'URL:', oauthUrl, 'Provider:', oauthProvider)}
         <View style={styles.modalHeader}>
           <TouchableOpacity 
             style={styles.modalClose} 
@@ -1840,17 +2435,21 @@ const PhoneNumberScreen = ({ navigation }) => {
             source={{ uri: oauthUrl }} 
             key={`oauth-webview-${oauthProvider}-${Date.now()}`}
             onMessage={(event) => {
-              console.log('🔗 WebView message received:', event.nativeEvent.data);
+              // WebView message received
             }}
             onNavigationStateChange={(navState) => {
-              console.log('🔗 OAuth WebView navigation:', navState.url);
-              
               // Check for OAuth callbacks
               if (navState.url.includes('oauth-callback') || navState.url.includes('sso-callback')) {
-                console.log('🎯 OAuth callback detected in navigation state change');
+                // Close WebView immediately and trigger refresh
+                setShowOAuthWebView(false);
+                setOauthUrl(null);
+                setOauthProvider(null);
                 
-                // Process the callback immediately
-                handleOAuthCallback(navState.url, oauthResultData);
+                // Trigger immediate refresh before processing callback
+                immediateRefreshUserData().then(() => {
+                  // Process the callback after refresh
+                  handleOAuthCallback(navState.url, oauthResultData);
+                });
               }
             }}
             onShouldStartLoadWithRequest={(request) => {
@@ -1860,13 +2459,16 @@ const PhoneNumberScreen = ({ navigation }) => {
               if (request.url.includes('oauth-callback') || request.url.includes('sso-callback')) {
                 console.log('🎯 OAuth callback detected in WebView onShouldStartLoadWithRequest, processing...');
                 
-                // Close WebView
+                // Close WebView immediately
                 setShowOAuthWebView(false);
                 setOauthUrl(null);
                 setOauthProvider(null);
                 
-                // Process the OAuth callback with the stored OAuth result data
-                handleOAuthCallback(request.url, oauthResultData);
+                // Trigger immediate refresh before processing callback
+                immediateRefreshUserData().then(() => {
+                  // Process the OAuth callback after refresh
+                  handleOAuthCallback(request.url, oauthResultData);
+                });
                 return false; // Don't load in WebView
               }
               
@@ -1895,7 +2497,11 @@ const PhoneNumberScreen = ({ navigation }) => {
                 return;
               }
               
-              Alert.alert('Error', 'Failed to load OAuth page. Please try again.');
+              showOAuthError(
+                'OAuth Page Load Failed',
+                'We were unable to load the Google sign-in page. Please try again.',
+                oauthProvider
+              );
               cleanupOAuthState();
             }}
             onHttpError={(syntheticEvent) => {
@@ -1904,7 +2510,11 @@ const PhoneNumberScreen = ({ navigation }) => {
               
               // Only show error for actual HTTP errors, not navigation issues
               if (nativeEvent.statusCode >= 400) {
-                Alert.alert('Connection Error', 'Failed to connect to authentication service. Please try again.');
+                showOAuthError(
+                  'Connection Error',
+                  'We were unable to connect to Google\'s authentication service. Please try again.',
+                  oauthProvider
+                );
                 cleanupOAuthState();
               }
             }}
@@ -1941,6 +2551,16 @@ const PhoneNumberScreen = ({ navigation }) => {
           />
         )}
       </Modal>
+      
+      {/* OAuth Error Modal */}
+      <OAuthErrorModal
+        visible={showOAuthErrorModal}
+        title={oauthErrorDetails.title}
+        subtitle={oauthErrorDetails.subtitle}
+        buttonText="Try Again"
+        onRetry={retryOAuth}
+        onClose={hideOAuthError}
+      />
     </View>
   );
 };

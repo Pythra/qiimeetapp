@@ -7,7 +7,8 @@ import {
   TouchableOpacity, 
   ImageBackground,
   StatusBar,
-  Dimensions
+  Dimensions,
+  Alert
 } from 'react-native';
 import { FONTS } from '../../constants/font';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,11 +32,31 @@ const LandingScreen = () => {
     navigation.navigate('Auth', { screen: 'SignIn' });
   };
 
+  // Handle social media button clicks
+  const handleSocialLogin = (provider) => {
+    switch (provider) {
+      case 'google':
+        // Navigate to signup screen for Google login
+        navigation.navigate('Auth', { screen: 'Signup' });
+        break;
+      case 'apple':
+        // TODO: Implement Apple login
+        Alert.alert('Coming Soon', 'Apple login will be available soon');
+        break;
+      case 'facebook':
+        // TODO: Implement Facebook login
+        Alert.alert('Coming Soon', 'Facebook login will be available soon');
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content"
-        backgroundColor="#121212"
-        translucent={false} />
+        backgroundColor="transparent"
+        translucent={true} />
       
       {/* Background Image */}
       <ImageBackground 
@@ -88,17 +109,26 @@ const LandingScreen = () => {
               
               {/* Social Auth Buttons */}
               <View style={styles.socialButtons}>
-                <TouchableOpacity style={styles.socialButton}>
+                <TouchableOpacity 
+                  style={styles.socialButton}
+                  onPress={() => handleSocialLogin('google')}
+                >
                   <View style={styles.socialIconCircle}>
                     <Image source={googleIcon} style={styles.socialIcon} resizeMode="contain" />
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.socialButton}>
+                <TouchableOpacity 
+                  style={styles.socialButton}
+                  onPress={() => handleSocialLogin('apple')}
+                >
                   <View style={styles.socialIconCircle}>
                     <Image source={appleIcon} style={styles.socialIcon} resizeMode="contain" />
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.socialButton}>
+                <TouchableOpacity 
+                  style={styles.socialButton}
+                  onPress={() => handleSocialLogin('facebook')}
+                >
                   <View style={styles.socialIconCircle}>
                     <Image source={fbIcon} style={styles.socialIcon} resizeMode="contain" />
                   </View>

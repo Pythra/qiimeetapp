@@ -6,6 +6,10 @@ const config = getDefaultConfig(__dirname);
 
 // Add better error handling for JSON parsing
 config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+
+// Remove TypeScript source extensions to avoid conflicts with node_modules
+// config.resolver.sourceExts.push('ts', 'tsx');
+
 config.transformer.minifierConfig = {
   keep_fnames: true,
   mangle: {

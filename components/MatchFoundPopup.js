@@ -18,6 +18,7 @@ import { getImageSource } from '../utils/imageUtils';
 import axios from 'axios';
 import ConnectionModal from '../screens/Likes/ConnectionModal';
 import ConnectionLimitModal from '../screens/Likes/ConnectionLimitModal';
+import SubscriptionRequiredModal from './SubscriptionRequiredModal';
 import CustomButton from '../constants/button';
 import HollowButton from '../constants/HollowButton';
 
@@ -28,66 +29,121 @@ const MatchFoundPopup = ({ visible, onClose, matchData, onNavigateToConnectionSe
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [limitModalVisible, setLimitModalVisible] = useState(false);
+  const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
 
-  // Debug logging - only log when props change meaningfully
+  // Debug logging for popup visibility and timing
   useEffect(() => {
-    // Removed debug logging to prevent console spam
+    if (visible && matchData) {
+      const popupShowTime = Date.now();
+      console.log('🎉 [DEBUG MATCH POPUP] Popup became visible:', {
+        matchedUserId: matchData.matchedUserId,
+        matchedUserName: matchData.matchedUserName,
+        type: matchData.type,
+        timestamp: new Date().toISOString(),
+        popupShowTime
+      });
+    } else if (!visible) {
+      console.log('❌ [DEBUG MATCH POPUP] Popup hidden');
+    }
   }, [visible, matchData]);
 
   // Fetch the other user's data when popup becomes visible
   useEffect(() => {
     if (visible && matchData) {
-      console.log('[MatchFoundPopup] Popup became visible, fetching user data for:', matchData);
       fetchOtherUser();
     } else if (!visible) {
-      console.log('[MatchFoundPopup] Popup hidden, clearing user data');
       setOtherUser(null);
       setLoading(true);
     }
   }, [visible, matchData]);
 
   const fetchOtherUser = async () => {
+    const fetchStartTime = Date.now();
     try {
       setLoading(true);
-      console.log('[MatchFoundPopup] Starting to fetch user data...');
+      console.log('🔄 [DEBUG MATCH POPUP] Starting to fetch other user:', {
+        matchedUserId: matchData?.matchedUserId,
+        hasToken: !!token,
+        timestamp: new Date().toISOString()
+      });
       
       if (!token || !matchData) {
-        console.warn('[MatchFoundPopup] Missing token or matchData:', { token: !!token, matchData });
+        console.log('⚠️ [DEBUG MATCH POPUP] Missing token or matchData, skipping fetch');
         setLoading(false);
         return;
       }
       
       const userIdToFetch = matchData.matchedUserId;
       if (!userIdToFetch) {
-        console.warn('[MatchFoundPopup] No matchedUserId found in matchData:', matchData);
+        console.log('⚠️ [DEBUG MATCH POPUP] No userId to fetch, skipping');
         setLoading(false);
         return;
       }
       
-      console.log('[MatchFoundPopup] Fetching matched user details for ID:', userIdToFetch);
+      // OPTIMIZATION: Reduce timeout and add retry logic
+      const apiStartTime = Date.now();
+      let response;
+      let retryCount = 0;
+      const maxRetries = 2;
       
-      const response = await axios.get(`${API_BASE_URL}/auth/user/${userIdToFetch}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000
+      while (retryCount <= maxRetries) {
+        try {
+          response = await axios.get(`${API_BASE_URL}/auth/user/${userIdToFetch}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 3000 // Reduced from 10000ms to 3000ms
+            }
+          );
+          break; // Success, exit retry loop
+        } catch (err) {
+          retryCount++;
+          if (retryCount > maxRetries) {
+            throw err; // Re-throw if max retries exceeded
+          }
+          console.log(`🔄 [DEBUG MATCH POPUP] Retry ${retryCount}/${maxRetries} for user fetch`);
+          await new Promise(resolve => setTimeout(resolve, 500 * retryCount)); // Exponential backoff
         }
-      );
+      }
       
-      console.log('[MatchFoundPopup] Matched user data fetched successfully:', response.data);
+      const apiEndTime = Date.now();
+      console.log('✅ [DEBUG MATCH POPUP] User data fetched successfully:', {
+        userId: userIdToFetch,
+        apiTime: apiEndTime - apiStartTime + 'ms',
+        totalTime: apiEndTime - fetchStartTime + 'ms',
+        retries: retryCount,
+        hasProfilePictures: response.data?.profilePictures?.length > 0,
+        timestamp: new Date().toISOString()
+      });
+      
       setOtherUser(response.data);
     } catch (err) {
-      // Silently handle errors - popup will work with basic info
-      console.warn('[MatchFoundPopup] Could not fetch user details, continuing with basic info:', err.message);
-      
-      // Set a basic user object so the popup can still function
-      setOtherUser({
-        username: 'User',
-        profilePictures: []
+      const errorTime = Date.now();
+      console.warn('❌ [DEBUG MATCH POPUP] Could not fetch user details after retries:', {
+        error: err.message,
+        timeSinceStart: errorTime - fetchStartTime + 'ms',
+        timestamp: new Date().toISOString()
       });
+      
+      // OPTIMIZATION: Use matchData for basic info instead of generic fallback
+      const fallbackUser = {
+        username: matchData?.matchedUserName || 'User',
+        name: matchData?.matchedUserName || 'User',
+        profilePictures: [],
+        _id: matchData?.matchedUserId
+      };
+      
+      console.log('🔄 [DEBUG MATCH POPUP] Using fallback user data from matchData:', fallbackUser);
+      setOtherUser(fallbackUser);
     } finally {
+      const finalTime = Date.now();
+      console.log('🏁 [DEBUG MATCH POPUP] Fetch completed:', {
+        totalTime: finalTime - fetchStartTime + 'ms',
+        loading: false,
+        timestamp: new Date().toISOString()
+      });
       setLoading(false);
     }
   };
@@ -166,6 +222,14 @@ const MatchFoundPopup = ({ visible, onClose, matchData, onNavigateToConnectionSe
     
     if (!selectedUserId || !token) {
       console.error('[MatchFoundPopup] Missing required data:', { selectedUserId, hasToken: !!token });
+      return;
+    }
+
+    // Check if user has subscription
+    if (!currentUser?.isSubscribed || !currentUser?.subscriptionExpiryDate || 
+        new Date(currentUser.subscriptionExpiryDate) <= new Date()) {
+      // Show subscription required modal instead of navigating
+      setSubscriptionModalVisible(true);
       return;
     }
     
@@ -261,6 +325,15 @@ const MatchFoundPopup = ({ visible, onClose, matchData, onNavigateToConnectionSe
   // Handle keep swiping button press
   const handleKeepSwiping = () => {
     onClose();
+  };
+
+  const handleSubscribe = () => {
+    setSubscriptionModalVisible(false);
+    onNavigateToPremium();
+  };
+
+  const handleCloseSubscriptionModal = () => {
+    setSubscriptionModalVisible(false);
   };
 
   // Remove debug logging to prevent infinite re-renders
@@ -368,6 +441,13 @@ const MatchFoundPopup = ({ visible, onClose, matchData, onNavigateToConnectionSe
           currentConnections={currentUser?.allowedConnections || 0}
           maxConnections={currentUser?.allowedConnections || 0}
           hasPendingRequest={hasExistingConnectionOrRequest()}
+        />
+        
+        {/* Subscription Required Modal */}
+        <SubscriptionRequiredModal
+          visible={subscriptionModalVisible}
+          onClose={handleCloseSubscriptionModal}
+          onSubscribe={handleSubscribe}
         />
       </View>
     </Modal>

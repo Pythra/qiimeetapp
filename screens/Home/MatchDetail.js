@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator, Share, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FONTS } from '../../constants/font';
@@ -9,6 +9,7 @@ import { FontAwesome6 } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../../env';
 import { useAuth } from '../../components/AuthContext';
+import { generateProfileShareData } from '../../utils/shareUtils';
 
 const MatchDetail = ({ navigation, route }) => {
   const userId = route.params?.userId;
@@ -319,6 +320,36 @@ const MatchDetail = ({ navigation, route }) => {
     return age;
   };
 
+  // Share user profile function
+  const shareProfile = async () => {
+    try {
+      if (!user) {
+        Alert.alert('Error', 'User information not available');
+        return;
+      }
+
+      // Generate share data using utility function
+      const shareData = generateProfileShareData(user._id, user.username || user.name);
+
+      const result = await Share.share({
+        message: shareData.message,
+        url: shareData.url,
+        title: shareData.title
+      });
+
+      if (result.action === Share.sharedAction) {
+        console.log('Profile shared successfully');
+        // Optional: Track analytics event
+        // analytics().logEvent('profile_shared', { userId: user._id });
+      } else if (result.action === Share.dismissedAction) {
+        console.log('Share dismissed');
+      }
+    } catch (error) {
+      console.error('Error sharing profile:', error);
+      Alert.alert('Error', 'Failed to share profile. Please try again.');
+    }
+  };
+
   return (
     <ScreenWrapper>
     <View style={styles.container}>
@@ -333,7 +364,7 @@ const MatchDetail = ({ navigation, route }) => {
         <TouchableOpacity onPress={() => navigation.goBack()}>
         <Ionicons name="chevron-back" size={24} color="#FFFFFF" />     
            </TouchableOpacity>
-        <TouchableOpacity style={styles.shareButton}>
+        <TouchableOpacity style={styles.shareButton} onPress={shareProfile}>
           <Text style={styles.shareText}>Share</Text>
           <Ionicons name="share-outline" size={18} color="white" />
         </TouchableOpacity>
@@ -434,12 +465,20 @@ const MatchDetail = ({ navigation, route }) => {
             )}
           </View>
         </View>
-        {/* Location Section */}
+        {/* Language Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Language</Text>
-           <View style={styles.loctag}>
-          <Text style={styles.locationText}>English</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Languages</Text>
+          {user.languages && user.languages.length > 0 ? (
+            <View style={styles.loctag}>
+              {user.languages.map((language, index) => (
+                <View key={index} style={[styles.loctag, { marginRight: 8, marginBottom: 8 }]}>
+                  <Text style={styles.locationText}>{language}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>No languages added</Text>
+          )}
         </View>
 
         {/* Location Section */}

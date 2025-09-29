@@ -8,10 +8,10 @@ import { TEXT_STYLES } from '../../../constants/text';
 import CustomButton from '../../../constants/button';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../../env';
-import { sendOTP, formatPhoneNumber } from '../signup/phonenumber';
-import { loginWithGoogle } from '../signup/googleSignin';
-import { loginWithApple } from '../signup/apple';
-import { loginWithFacebook } from '../signup/facebook';
+import { sendOTP, formatPhoneNumber } from '../signup/Phone';
+import { loginWithGoogle } from '../signup/Google';
+import { loginWithApple } from '../signup/Apple';
+import { loginWithFacebook } from '../signup/Facebook';
 
 const { width, height } = Dimensions.get('window');
 const googleIcon = require('../../../assets/google.png');

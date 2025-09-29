@@ -32,20 +32,29 @@ const ConnectionAcceptedPopup = ({ visible, onClose, connectionData }) => {
   const [otherUser, setOtherUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Debug logging - only log when props change meaningfully
+  // Debug logging - comprehensive debugging to identify issues
   useEffect(() => {
-    if (visible || connectionData) {
-      console.log('[ConnectionAcceptedPopup] Props changed:', { visible, connectionData });
+    console.log('🔍 [ConnectionAcceptedPopup] Props changed:', { 
+      visible, 
+      connectionData,
+      timestamp: new Date().toISOString()
+    });
+    if (visible) {
+      console.log('🔍 [ConnectionAcceptedPopup] POPUP IS VISIBLE!');
+      console.log('🔍 [ConnectionAcceptedPopup] Connection data:', JSON.stringify(connectionData, null, 2));
+    } else {
+      console.log('🔍 [ConnectionAcceptedPopup] Popup is NOT visible - visible prop is false');
     }
   }, [visible, connectionData]);
 
   // Fetch the other user's data when popup becomes visible
   useEffect(() => {
+    console.log('🔍 [ConnectionAcceptedPopup] useEffect triggered:', { visible, connectionData });
     if (visible && connectionData) {
-      console.log('[ConnectionAcceptedPopup] Popup became visible, fetching user data for:', connectionData);
+      console.log('🔍 [ConnectionAcceptedPopup] Popup became visible, fetching user data for:', connectionData);
       fetchOtherUser();
     } else if (!visible) {
-      console.log('[ConnectionAcceptedPopup] Popup hidden, clearing user data');
+      console.log('🔍 [ConnectionAcceptedPopup] Popup hidden, clearing user data');
       setOtherUser(null);
       setLoading(true);
     }
@@ -54,10 +63,9 @@ const ConnectionAcceptedPopup = ({ visible, onClose, connectionData }) => {
   const fetchOtherUser = async () => {
     try {
       setLoading(true);
-      console.log('[ConnectionAcceptedPopup] Starting to fetch user data...');
       
-      if (!token || !connectionData) {
-        console.warn('[ConnectionAcceptedPopup] Missing token or connectionData:', { token: !!token, connectionData });
+      if (!connectionData) {
+        console.error('🔍 [ConnectionAcceptedPopup] Missing connectionData:', connectionData);
         setLoading(false);
         return;
       }
@@ -65,33 +73,72 @@ const ConnectionAcceptedPopup = ({ visible, onClose, connectionData }) => {
       // For connection_accepted events, we want to show the accepter's details to the requester
       // The accepterId is the user who accepted the connection request
       const userIdToFetch = connectionData.accepterId;
+      
       if (!userIdToFetch) {
-        console.warn('[ConnectionAcceptedPopup] No accepterId found in connectionData:', connectionData);
+        console.error('🔍 [ConnectionAcceptedPopup] No accepterId found in connectionData:', connectionData);
         setLoading(false);
         return;
       }
       
-      console.log('[ConnectionAcceptedPopup] Fetching accepter details for ID:', userIdToFetch);
+      // Always get fresh token from AsyncStorage to avoid stale token issues
+      let authToken;
+      try {
+        authToken = await AsyncStorage.getItem('token');
+        if (!authToken) {
+          console.error('🔍 [ConnectionAcceptedPopup] No token found in storage');
+          setLoading(false);
+          return;
+        }
+        
+        // Validate token format
+        if (!authToken.startsWith('Bearer ') && !authToken.includes('.')) {
+          console.error('🔍 [ConnectionAcceptedPopup] Invalid token format');
+          setLoading(false);
+          return;
+        }
+        
+        // Remove 'Bearer ' prefix if present
+        if (authToken.startsWith('Bearer ')) {
+          authToken = authToken.substring(7);
+        }
+      } catch (tokenError) {
+        console.error('🔍 [ConnectionAcceptedPopup] Could not get token from storage:', tokenError);
+        setLoading(false);
+        return;
+      }
+      
+      console.log('🔍 [ConnectionAcceptedPopup] Fetching user details for:', userIdToFetch);
       
       const response = await axios.get(`${API_BASE_URL}/auth/user/${userIdToFetch}`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json'
           },
-          timeout: 10000 // Add timeout
+          timeout: 15000 // Increased timeout
         }
       );
       
-      console.log('[ConnectionAcceptedPopup] Accepter data fetched successfully:', response.data);
+      console.log('🔍 [ConnectionAcceptedPopup] User details fetched successfully');
       setOtherUser(response.data);
     } catch (err) {
-      // Silently handle errors - popup will work with basic info
-      console.warn('[ConnectionAcceptedPopup] Could not fetch user details, continuing with basic info:', err.message);
+      console.error('🔍 [ConnectionAcceptedPopup] Error fetching user details:', err);
+      
+      if (err.response?.status === 401) {
+        console.error('🔍 [ConnectionAcceptedPopup] 401 Unauthorized - token may be invalid or expired');
+        // Don't retry immediately to avoid infinite loops
+        // The user will need to re-authenticate
+      } else if (err.response?.status === 404) {
+        console.error('🔍 [ConnectionAcceptedPopup] 404 Not Found - user may not exist');
+      } else {
+        console.error('🔍 [ConnectionAcceptedPopup] Other error:', err.response?.status, err.message);
+      }
       
       // Set a basic user object so the popup can still function
       setOtherUser({
+        _id: connectionData.accepterId,
         username: 'User',
+        name: 'User',
         profilePictures: []
       });
     } finally {
@@ -102,21 +149,26 @@ const ConnectionAcceptedPopup = ({ visible, onClose, connectionData }) => {
   const handleSendMessage = async () => {
     if (!message.trim() || isSending) return;
     
-    console.log('[ConnectionAcceptedPopup] Sending message:', message.trim());
-    console.log('[ConnectionAcceptedPopup] Navigating to chat with accepter:', connectionData.accepterId);
-    
-    // Navigate directly to ChatInterface with the message and user ID
-    navigateToChatStack('ChatInterface', {
-      otherUserId: connectionData.accepterId,
-      initialMessage: message.trim(),
-      forceCreateChat: true
-    });
-    
-    // Close the popup
+    // Close the popup immediately for better UX
     onClose();
+    
+    // Navigate to ChatInterface with the message and user ID
+    // Use setTimeout to ensure popup closes first, then navigate
+    setTimeout(() => {
+      navigateToChatStack('ChatInterface', {
+        otherUserId: connectionData.accepterId,
+        initialMessage: message.trim(),
+        forceCreateChat: true
+      });
+    }, 100); // Small delay to ensure popup closes smoothly
   };
 
-  if (!visible) return null;
+  if (!visible) {
+    console.log('🔍 [ConnectionAcceptedPopup] Not visible, returning null');
+    return null;
+  }
+
+  console.log('🔍 [ConnectionAcceptedPopup] Rendering modal with visible=true');
 
   return (
     <Modal

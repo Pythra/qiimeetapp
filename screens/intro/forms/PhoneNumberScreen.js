@@ -118,7 +118,8 @@ const PhoneNumberScreen = ({ navigation, route }) => {
             phoneNumber: phoneNumberToUse,
             socialLoginData: socialLoginData,
             provider: provider,
-            isSignIn: isSignIn
+            isSignIn: isSignIn,
+            fromSignIn: isSignIn
           }
         });
       } else {
@@ -139,7 +140,7 @@ const PhoneNumberScreen = ({ navigation, route }) => {
       // Bypass OTP sending for testing
       navigation.navigate('Auth', {
         screen: 'VerificationCode',
-        params: { phoneNumber, pinId: 'dummy-pin-id' },
+        params: { phoneNumber, pinId: 'dummy-pin-id', fromSignIn: false },
       });
     }
   };

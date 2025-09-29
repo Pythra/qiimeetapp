@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, Pressable, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Modal, Pressable, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { FONTS } from '../../constants/font';
 import ConnectionPolicyModal from './ConnectionPolicyModal';
 import ConnectionLimitModal from './ConnectionLimitModal';
+import ProfilePopupModal from '../../components/ProfilePopupModal';
+import SubscriptionRequiredModal from '../../components/SubscriptionRequiredModal';
 import TopHeader from '../../components/TopHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { MaterialIcons, FontAwesome6 } from '@expo/vector-icons';
@@ -13,7 +15,7 @@ import { API_BASE_URL } from '../../env';
 import { useAuth } from '../../components/AuthContext';
 
 const ConnectionRequests = ({ navigation }) => {
-  const { user: currentUser, allUsers, updateUser, getProfileImageSource } = useAuth();
+  const { user: currentUser, allUsers, updateUser, getProfileImageSource, getImageSource } = useAuth();
   const [policyModalVisible, setPolicyModalVisible] = useState(false);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [limitModalVisible, setLimitModalVisible] = useState(false);
@@ -21,6 +23,12 @@ const ConnectionRequests = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequester, setSelectedRequester] = useState(null);
   const [pastConnections, setPastConnections] = useState([]);
+  const [activeConnections, setActiveConnections] = useState([]);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedProfileUser, setSelectedProfileUser] = useState(null);
+  
+  // Subscription required modal state
+  const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
 
   // Calculate age from dateOfBirth
   const calculateAge = (dateOfBirth) => {
@@ -37,6 +45,64 @@ const ConnectionRequests = ({ navigation }) => {
     }
     
     return age;
+  };
+
+  const renderActiveConnection = (user) => {
+    const handleConnectionPress = () => {
+      // Navigate to chat with this user using nested navigation
+      navigation.navigate('Chat', {
+        screen: 'ChatInterface',
+        params: {
+          otherUserId: user._id,
+          senderId: user._id, // For compatibility
+          chatId: `${currentUser._id}-${user._id}` // Construct chat ID
+        }
+      });
+    };
+
+    return (
+      <TouchableOpacity 
+        key={`active-connection-${user._id}`}
+        style={styles.activeConnectionCard}
+        onPress={handleConnectionPress}
+      >
+        <View style={styles.activeConnectionContent}>
+          <View style={styles.activeConnectionImageContainer}>
+            <Image 
+              source={getProfileImageSource(user)}
+              style={styles.activeConnectionImage}
+            />
+          </View>
+          <View style={styles.activeConnectionInfo}>
+            <Text style={styles.activeConnectionName}>
+              {user.username || user.name}
+              {(user.age || calculateAge(user.dateOfBirth)) ? `, ${user.age || calculateAge(user.dateOfBirth)}` : ''}
+            </Text>
+            {(user?.verificationStatus === 'verified') && (
+              <View style={styles.verifiedContainer}>
+                <MaterialIcons name="verified" size={16} color="#ec066a" />
+              </View>
+            )}
+          </View>
+        </View>
+        <TouchableOpacity style={styles.messageButton}>
+          <Image 
+            source={require('../../assets/tab_icons/chat.png')}
+            style={styles.messageIcon}
+          />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  };
+
+  const openProfileModal = (user) => {
+    setSelectedProfileUser(user);
+    setProfileModalVisible(true);
+  };
+
+  const closeProfileModal = () => {
+    setSelectedProfileUser(null);
+    setProfileModalVisible(false);
   };
 
   const fetchData = async (isRefreshing = false) => {
@@ -63,7 +129,9 @@ const ConnectionRequests = ({ navigation }) => {
           allUsersData = allUsers;
         } else {
           // Fetch all users with complete data only if not available in context
-          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`);
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
           const allUsersResponse = await allUsersRes.json();
           allUsersData = allUsersResponse.users || [];
         }
@@ -79,6 +147,31 @@ const ConnectionRequests = ({ navigation }) => {
         setRequests([]);
       }
 
+      // Fetch active connections
+      if (currentUser.connections && currentUser.connections.length > 0) {
+        let allUsersData = [];
+        if (allUsers && allUsers.length > 0) {
+          allUsersData = allUsers;
+        } else {
+          // Fetch all users with complete data only if not available in context
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const allUsersResponse = await allUsersRes.json();
+          allUsersData = allUsersResponse.users || [];
+        }
+        
+        // Map connection IDs to complete user data
+        const completeActiveConnections = currentUser.connections.map(connectionId => {
+          const completeUser = allUsersData.find(user => user._id === connectionId);
+          return completeUser || { _id: connectionId }; // Fallback to basic object if not found
+        }).filter(Boolean);
+        
+        setActiveConnections(completeActiveConnections);
+      } else {
+        setActiveConnections([]);
+      }
+
       // Fetch past connections for the "View Past Connections" button
       if (currentUser.pastConnections && currentUser.pastConnections.length > 0) {
         let allUsersData = [];
@@ -86,7 +179,9 @@ const ConnectionRequests = ({ navigation }) => {
           allUsersData = allUsers;
         } else {
           // Fetch all users with complete data only if not available in context
-          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`);
+          const allUsersRes = await fetch(`${API_BASE_URL}/admin/users/home`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
           const allUsersResponse = await allUsersRes.json();
           allUsersData = allUsersResponse.users || [];
         }
@@ -156,21 +251,15 @@ const ConnectionRequests = ({ navigation }) => {
     setPolicyModalVisible(false);
     if (!currentUser || !selectedRequester) return;
     
-    // Navigate to chat without specifying chatId - let ChatInterface create it
-    navigation.navigate('MainTabs', {
-      screen: 'Chat',
-      params: {
-        connectionEstablished: true,
-        newConnectionUserId: selectedRequester._id,
-        screen: 'ChatInterface',
-        params: {
-          otherUserId: selectedRequester._id, // the person you are chatting with
-          otherUser: selectedRequester, // pass the full user object
-        }
-      }
-    });
+    // Check if user has subscription
+    if (!currentUser?.isSubscribed || !currentUser?.subscriptionExpiryDate || 
+        new Date(currentUser.subscriptionExpiryDate) <= new Date()) {
+      // Show subscription required modal instead of navigating
+      setSubscriptionModalVisible(true);
+      return;
+    }
     
-    // Call backend to update connections
+    // Call backend to update connections FIRST
     try {
       const token = await AsyncStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/auth/accept-connection`, {
@@ -184,14 +273,35 @@ const ConnectionRequests = ({ navigation }) => {
       
       if (response.ok) {
         const responseData = await response.json();
-        // Update user data in AuthContext
+        console.log('✅ [ConnectionRequests] Connection accepted successfully, updating user data');
+        
+        // Update user data in AuthContext FIRST
         updateUser(responseData);
+        
         // Remove accepted requester from requests state
         setRequests(prev => prev.filter(r => r._id !== selectedRequester._id));
+        
+        // Wait a moment for state to update, then navigate
+        setTimeout(() => {
+          console.log('✅ [ConnectionRequests] Navigating to chat after successful acceptance');
+          navigation.navigate('MainTabs', {
+            screen: 'Chat',
+            params: {
+              connectionEstablished: true,
+              newConnectionUserId: selectedRequester._id,
+              screen: 'ChatInterface',
+              params: {
+                otherUserId: selectedRequester._id, // the person you are chatting with
+                otherUser: selectedRequester, // pass the full user object
+              }
+            }
+          });
+        }, 500); // Small delay to ensure state updates
+      } else {
+        // Silently handle error - don't show alerts or console errors
       }
     } catch (err) {
-      // Handle error (show toast, etc.)
-      console.error('Failed to accept connection', err);
+      // Silently handle error - don't show alerts or console errors
     }
   };
 
@@ -204,6 +314,15 @@ const ConnectionRequests = ({ navigation }) => {
       // Fallback navigation
       navigation.navigate('Premium');
     }
+  };
+
+  const handleSubscribe = () => {
+    setSubscriptionModalVisible(false);
+    navigation.navigate('Premium', { screen: 'SubscriptionScreen' });
+  };
+
+  const handleCloseSubscriptionModal = () => {
+    setSubscriptionModalVisible(false);
   };
 
   return (
@@ -225,21 +344,14 @@ const ConnectionRequests = ({ navigation }) => {
             colors={["#ec066a"]}
           />
         }
-      >
-        {/* Info Boxes */}
-        <TouchableOpacity style={styles.infoBox}>
-          <View style={styles.infoBoxContent}>
-          <Ionicons name="information-circle" size={18} color="#666" style={{marginRight: 16}}/>
-            <View>
-              <Text style={styles.infoBoxSubtitle}>
-              You have some pending connection requests. 
-              Review them before they expire.
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-        
-        {/* Only show "View Past Connections" if there are actual past connections */}
+      >  
+      {activeConnections.length > 0 && (
+        <View style={styles.activeConnectionSection}>
+          <Text style={styles.activeConnectionTitle}>Active Connections</Text>
+          {activeConnections.map(renderActiveConnection)}
+        </View>
+      )}
+
         {pastConnections.length > 0 && (
           <TouchableOpacity 
             style={styles.infoBox}
@@ -252,20 +364,37 @@ const ConnectionRequests = ({ navigation }) => {
           </TouchableOpacity>
         )}
 
+        {/* Info Box for Pending Requests - Only show if there are requests */}
+        {requests.length > 0 && (
+          <TouchableOpacity style={styles.infoBox}>
+            <View style={styles.infoBoxContent}>
+              <Ionicons name="information-circle" size={18} color="#666" style={{marginRight: 16}}/>
+              <View>
+                <Text style={styles.infoBoxSubtitle}>
+                  You have some pending connection requests. 
+                  Review them before they expire.
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* Request Cards */}
         {requests.length > 0 ? requests.map((request) => (
           <View key={request._id} style={styles.requestCard}>
-            <Image 
-              source={getProfileImageSource(request)}
-              style={styles.userImage} 
-            />
+            <TouchableOpacity onPress={() => openProfileModal(request)}>
+              <Image 
+                source={getProfileImageSource(request)}
+                style={styles.userImage} 
+              />
+            </TouchableOpacity>
             <View style={styles.userInfo}>
               <View style={styles.nameContainer}>
                 <Text style={styles.userName}>
                   {request.username || request.name || request.phone || 'User'}
                   {(request.age || calculateAge(request.dateOfBirth)) ? `, ${request.age || calculateAge(request.dateOfBirth)}` : ''}
                 </Text>
-                {request.verificationStatus === 'true' && (
+                {(request.verificationStatus === 'verified') && (
                   <MaterialIcons name="verified" size={16} color="#EC066A" style={styles.verifiedIcon} />
                 )}
               </View>
@@ -350,6 +479,21 @@ const ConnectionRequests = ({ navigation }) => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ProfilePopupModal
+        visible={profileModalVisible}
+        onClose={closeProfileModal}
+        user={selectedProfileUser}
+        getProfileImageSource={getProfileImageSource}
+        getImageSource={getImageSource}
+        calculateAge={calculateAge}
+      />
+      
+      <SubscriptionRequiredModal
+        visible={subscriptionModalVisible}
+        onClose={handleCloseSubscriptionModal}
+        onSubscribe={handleSubscribe}
+      />
     </View>
   );
 };
@@ -529,6 +673,71 @@ const styles = StyleSheet.create({
     fontFamily: FONTS?.regular || 'System',
     width: '57%',
   },
+  // Active Connection Styles
+  activeConnectionSection: {
+    paddingVertical: 8,
+    marginBottom: 24,
+  },
+  activeConnectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 16,
+    fontFamily: FONTS.medium,
+  },
+  activeConnectionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12, 
+  },
+  activeConnectionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  activeConnectionImageContainer: {
+    position: 'relative',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+  },
+  activeConnectionImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 25,
+  },
+  activeConnectionInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeConnectionName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+    marginRight: 6,
+    fontFamily: FONTS.medium,
+  },
+  verifiedContainer: {
+    marginTop: 2,
+  },
+  messageButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messageIcon: {
+    width: 24,
+    height: 24,
+    tintColor: '#fff',
+  },
+
   xIcon: {
     width: 104,
     height: 104,

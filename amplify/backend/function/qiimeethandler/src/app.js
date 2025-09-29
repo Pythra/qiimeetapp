@@ -11,6 +11,8 @@ const sharp = require('sharp');
 const { optimizeAndUpload } = require('./utils/imageOptimizer');
 const bodyParser = require('body-parser');
 const awsServerlessExpressMiddleware = require('aws-serverless-express/middleware');
+const socketServer = require('./socketServer');
+const markUserOnline = require('./middleware/onlineStatus');
 
 dotenv.config();
 
@@ -21,6 +23,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const agoraRoutes = require('./routes/agoraRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const onlineStatusRoutes = require('./routes/onlineStatusRoutes');
 
 const app = express();
 
@@ -35,6 +38,9 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(awsServerlessExpressMiddleware.eventContext());
 app.use(express.json());
+
+// Add online status tracking middleware
+app.use(markUserOnline);
 
 // Root health check
 app.get('/', (req, res) => {
@@ -53,6 +59,10 @@ app.use((req, res, next) => {
 
 // Connect to MongoDB
 connectDB();
+
+// Initialize socket server for online status tracking
+// In Lambda environment, we use a mock socket server
+app.set('io', null);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -134,6 +144,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/agora', agoraRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notification', notificationRoutes);
+app.use('/api/online-status', onlineStatusRoutes);
 
 // Export the app object
 module.exports = app;

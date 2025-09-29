@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, Modal, Pressable } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import HollowButton from '../../constants/HollowButton';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { FontAwesome6 } from '@expo/vector-icons';
@@ -66,13 +66,66 @@ const ConnectionSent = ({ route }) => {
     }
   };
 
+  // Clear connection request timestamp when connection is accepted
+  const clearConnectionRequest = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await fetch(`${API_BASE_URL}/auth/expire-request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ targetUserId }),
+      });
+    } catch (err) {
+      console.log('Failed to clear connection request:', err.message);
+    }
+  }, [targetUserId]);
+
   useEffect(() => {
     if (timeLeft === 0) {
       expireRequest(true);
       return;
     }
     if (timeLeft < 0) return;
-    const timer = setInterval(() => {
+    
+    const timer = setInterval(async () => {
+      // Check if connection was accepted before updating timer
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+          const response = await axios.get(`${API_BASE_URL}/auth/connections`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          const connectionExists = response.data.connections?.some(
+            conn => conn.userId === targetUserId || conn.otherUserId === targetUserId
+          );
+          
+          if (connectionExists) {
+            // Connection was accepted, stop the timer and navigate away
+            clearInterval(timer);
+            clearConnectionRequest();
+            navigation.reset({
+              index: 0,
+              routes: [
+                { 
+                  name: 'AcceptedConnection', 
+                  params: {
+                    targetUserId,
+                    acceptedBy: targetUserId 
+                  }
+                }
+              ]
+            });
+            return;
+          }
+        }
+      } catch (error) {
+        // Continue with timer if check fails
+      }
+      
       // Use the initial sentAt value to calculate remaining time
       if (sentAtRef.current) {
         const now = Date.now();
@@ -83,19 +136,25 @@ const ConnectionSent = ({ route }) => {
         setTimeLeft(prev => prev - 1);
       }
     }, 1000);
-    return () => clearInterval(timer);
-  }, [sentAtRef.current]);
+    
+    // Cleanup function to clear timer and reset state
+    return () => {
+      clearInterval(timer);
+      setTimeLeft(0); // Reset countdown when component unmounts
+    };
+  }, [sentAtRef.current, targetUserId, navigation, clearConnectionRequest]);
 
   // Listen for connection acceptance via EventEmitter (global handling)
   useEffect(() => {
     const handleConnectionAccepted = (data) => {
-      // Navigate to AcceptedConnection screen when connection is accepted
-      // This is now handled globally, but we can still navigate if needed
+      // When connection is accepted, just clear the request timestamp
+      // The global popup will handle the UI, don't navigate automatically
       if (data.targetUserId === targetUserId) {
-        navigation.replace('AcceptedConnection', { 
-          targetUserId,
-          acceptedBy: data.accepterId || targetUserId 
-        });
+        // Clear the connection request timestamp first
+        clearConnectionRequest();
+        
+        // Don't navigate automatically - let the global popup handle it
+        // This allows the popup to stay visible on both screens
       }
     };
 
@@ -105,8 +164,47 @@ const ConnectionSent = ({ route }) => {
     // Cleanup listeners on unmount
     return () => {
       EventEmitter.off('connection_accepted', handleConnectionAccepted);
+      // Also clear any pending timers and reset state
+      setTimeLeft(0);
     };
-  }, [targetUserId, navigation]);
+  }, [targetUserId, clearConnectionRequest]);
+
+  // Check connection status when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      const checkConnectionStatus = async () => {
+        if (!targetUserId) return;
+        
+        try {
+          const token = await AsyncStorage.getItem('token');
+          if (!token) return;
+          
+          // Check if connection exists (meaning it was accepted)
+          const response = await axios.get(`${API_BASE_URL}/auth/connections`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          // Check if targetUserId exists in the connections list
+          const connectionExists = response.data.connections?.some(
+            conn => conn.userId === targetUserId || conn.otherUserId === targetUserId
+          );
+          
+          if (connectionExists) {
+            // Connection was accepted, clear the request timestamp first
+            clearConnectionRequest();
+            
+            // Don't navigate automatically - let the global popup handle it
+            // This allows the popup to stay visible on both screens
+          }
+        } catch (error) {
+          // If error, assume connection is still pending
+          console.log('Connection status check failed, assuming pending:', error.message);
+        }
+      };
+      
+      checkConnectionStatus();
+    }, [targetUserId, clearConnectionRequest])
+  );
 
   const formatTime = (seconds) => {
     const hrs = Math.floor(seconds / 3600);

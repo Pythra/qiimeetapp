@@ -14,8 +14,7 @@ import ZodiacSignFilter from '../screens/Home/ZodiacSignFilter';
 import FamilyPlanFilter from '../screens/Home/FamilyPlanFilter';
 import PersonalityFilter from '../screens/Home/PersonalityFilter';
 import ReligionFilter from '../screens/Home/ReligionFilter';
-import ReportUser from '../screens/Home/ReportUser';
-import ReportDetails from '../screens/Home/ReportDetails';  
+import ReportUser from '../screens/Home/ReportUser';  
 const Stack = createStackNavigator();
 
 const HomeStack = () => {
@@ -47,7 +46,6 @@ const HomeStack = () => {
       <Stack.Screen name="PersonalityFilter" component={PersonalityFilter} />
       <Stack.Screen name="ReligionFilter" component={ReligionFilter} />
       <Stack.Screen name="ReportUser" component={ReportUser} />
-      <Stack.Screen name="ReportDetails" component={ReportDetails} />
     </Stack.Navigator>
   );
 };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
@@ -121,64 +122,68 @@ const Notification = ({ navigation }) => {
 
   if (loading && !refreshing) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         <TopHeader title="Notifications" onBack={() => navigation.goBack()} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#EC066A" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
+        <View style={{ flex: 1 }}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#EC066A" />
+            <Text style={styles.loadingText}>Loading notifications...</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <TopHeader title="Notifications" onBack={() => navigation.goBack()} />
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#EC066A"
-            colors={["#EC066A"]}
-          />
-        }
-      >
-        {error ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => fetchNotifications()}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : notifications.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-off" size={64} color="#666" />
-            <Text style={styles.emptyText}>No notifications yet</Text>
-            <Text style={styles.emptySubtext}>You'll see notifications here when you receive them</Text>
-          </View>
-        ) : (
-          notifications.map((notification) => (
-            <TouchableOpacity
-              key={notification._id}
-              style={styles.notificationBox}
-              onPress={() => markAsRead(notification._id)}
-            >
-              <Image source={getImageSource(notification)} style={styles.avatar} />
-              <View style={styles.textContent}>
-                <Text style={styles.title}>{notification.title}</Text>
-                {!!notification.body && <Text style={styles.subtitle}>{notification.body}</Text>}
-                <Text style={styles.timestamp}>
-                  {new Date(notification.createdAt).toLocaleDateString()} • {new Date(notification.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-    </View>
+      <View style={{ flex: 1 }}>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#EC066A"
+              colors={["#EC066A"]}
+            />
+          }
+        >
+          {error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => fetchNotifications()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : notifications.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-off" size={64} color="#666" />
+              <Text style={styles.emptyText}>No notifications yet</Text>
+              <Text style={styles.emptySubtext}>You'll see notifications here when you receive them</Text>
+            </View>
+          ) : (
+            notifications.map((notification) => (
+              <TouchableOpacity
+                key={notification._id}
+                style={styles.notificationBox}
+                onPress={() => markAsRead(notification._id)}
+              >
+                <Image source={getImageSource(notification)} style={styles.avatar} />
+                <View style={styles.textContent}>
+                  <Text style={styles.title}>{notification.title}</Text>
+                  {!!notification.body && <Text style={styles.subtitle}>{notification.body}</Text>}
+                  <Text style={styles.timestamp}>
+                    {new Date(notification.createdAt).toLocaleDateString()} • {new Date(notification.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 };
 
@@ -188,7 +193,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212', 
   }, 
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingTop: 8,
     paddingBottom: 32,
   },
   notificationBox: {

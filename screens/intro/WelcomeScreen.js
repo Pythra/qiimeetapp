@@ -8,6 +8,7 @@ const { width, height } = Dimensions.get('window');
 
 import CustomButton from '../../constants/button';
 import { FONTS } from '../../constants/font';
+import { navigationRef } from '../../utils/navigationRef';
 import TopMaleOrbit from '../../animations/TopMaleOrbit';
 import HeartBeatAnimation from '../../animations/HeartBeatAnimation';
 import WelcomeWrapper from '../../components/WelcomeWrapper';
@@ -193,7 +194,19 @@ const WelcomeScreen = ( ) => {
           </Text> 
           <CustomButton 
                 title="Continue"
-                onPress={() => navigation.navigate('Onboarding', { screen: 'DisplayName' })}
+                onPress={() => {
+                  // Add a small delay to ensure navigation context is ready
+                  setTimeout(() => {
+                    try {
+                      // Use global navigationRef for more reliable navigation
+                      navigationRef.current?.navigate('Onboarding', { screen: 'DisplayName' });
+                    } catch (error) {
+                      console.log('Navigation error:', error);
+                      // Fallback: try local navigation
+                      navigation.navigate('DisplayName');
+                    }
+                  }, 100);
+                }}
               />
         </View>
       </View>

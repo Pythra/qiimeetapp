@@ -22,8 +22,10 @@ import BasicInfo from '../screens/Profile/BasicInfo';
 import Help from '../screens/Profile/Help';
 import FAQs from '../screens/Profile/FAQs';
 import PrivacyPolicy from '../screens/Profile/PrivacyPolicy';
+import TermsOfService from '../screens/Profile/TermsOfService';
 import About from '../screens/Profile/About';
 import AboutQiimeet from '../screens/Profile/AboutQiimeet';
+import ReportDetails from '../screens/Home/ReportDetails';
 
 const Stack = createStackNavigator();
 
@@ -61,8 +63,10 @@ const ProfileStack = () => {
       <Stack.Screen name="Help" component={Help} />
       <Stack.Screen name="FAQs" component={FAQs} />
       <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} />
+      <Stack.Screen name="TermsOfService" component={TermsOfService} />
       <Stack.Screen name="About" component={About} />
       <Stack.Screen name="AboutQiimeet" component={AboutQiimeet} />
+      <Stack.Screen name="ReportDetails" component={ReportDetails} />
       <Stack.Screen name="RelationshipGoals" component={RelationshipGoals} />
     </Stack.Navigator>
   );

@@ -76,7 +76,10 @@ const LifestyleChoicesFilter = ({ navigation }) => {
             selectedChoices.length > 0 ? styles.doneButtonActive : styles.doneButtonInactive
           ]}
           activeOpacity={0.8}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            // Pass the selected lifestyle choices back to BasicFilters
+            navigation.navigate('BasicFilters', { selectedLifestyleChoices: selectedChoices });
+          }}
         >
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>

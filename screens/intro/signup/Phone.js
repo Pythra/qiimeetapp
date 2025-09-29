@@ -92,7 +92,7 @@ export function usePhoneNumber(navigation) {
           
           navigation.navigate('Auth', {
             screen: 'VerificationCode',
-            params: { phoneNumber: phoneNumberToUse, pinId: otpResult.pinId },
+            params: { phoneNumber: phoneNumberToUse, pinId: otpResult.pinId, fromSignIn: false },
           });
         } else {
           Alert.alert('Error', otpResult.message || 'Failed to send OTP');

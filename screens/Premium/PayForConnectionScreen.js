@@ -38,7 +38,7 @@ const carouselData = [
 
 
 const PayForConnectionScreen = ({ navigation }) => {
-  const { user: currentUser, updateUser, refreshUser, balance: userBalance } = useAuth();
+  const { user: currentUser, updateUser, refreshUser, balance: userBalance, refreshBalance } = useAuth();
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -74,7 +74,10 @@ const PayForConnectionScreen = ({ navigation }) => {
         setLastRefreshTime(now);
         refreshUser();
       }
-    }, [currentUser, lastRefreshTime, refreshUser])
+      
+      // Always refresh balance when screen comes into focus
+      refreshBalance();
+    }, [currentUser, lastRefreshTime, refreshUser, refreshBalance])
   );
 
   // Fetch connection options when component mounts

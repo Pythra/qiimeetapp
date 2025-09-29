@@ -89,7 +89,11 @@ export const AuthProvider = ({ children, preloadedData }) => {
                 console.warn('Balance fetch failed:', error.response?.status, error.message);
                 return { data: { balance: 0 } }; // Return default balance on error
               }),
-              fetch(`${API_BASE_URL}/admin/users/home`).then(res => res.json()).catch(() => ({ success: false, users: [] }))
+              fetch(`${API_BASE_URL}/admin/users/home`, {
+                headers: {
+                  'Authorization': `Bearer ${storedToken}`
+                }
+              }).then(res => res.json()).catch(() => ({ success: false, users: [] }))
             ]);
             
             if (userResponse.data) {
@@ -206,7 +210,11 @@ export const AuthProvider = ({ children, preloadedData }) => {
                 'Content-Type': 'application/json'
               }
             }).catch(() => ({ data: { balance: 0 } })),
-            fetch(`${API_BASE_URL}/admin/users/home`).then(res => res.json()).catch(() => ({ success: false, users: [] }))
+            fetch(`${API_BASE_URL}/admin/users/home`, {
+              headers: {
+                'Authorization': `Bearer ${authToken}`
+              }
+            }).then(res => res.json()).catch(() => ({ success: false, users: [] }))
           ]);
 
           if (balanceResponse.data) {
@@ -524,8 +532,8 @@ export const AuthProvider = ({ children, preloadedData }) => {
         }
       });
       
-              if (response.data) {
-          setUser(response.data);
+      if (response.data) {
+        setUser(response.data);
         // Store userId in AsyncStorage for socket connections and event handling
         if (response.data._id) {
           await AsyncStorage.setItem('userId', response.data._id);
@@ -534,12 +542,23 @@ export const AuthProvider = ({ children, preloadedData }) => {
         // No user data in refresh response
       }
     } catch (error) {
+      console.error('[AuthContext] Error refreshing user:', error);
+      
       // If it's a 401 error, the token is invalid
       if (error.response?.status === 401) {
-
+        console.log('[AuthContext] Token invalid (401), clearing credentials');
         await AsyncStorage.multiRemove(['token', 'userId']);
         setToken(null);
         setUser(null);
+      } else if (error.response?.status === 500) {
+        // Server error - don't clear credentials, just log
+        console.warn('[AuthContext] Server error (500) during user refresh, keeping credentials');
+      } else if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        // Network error - don't clear credentials, just log
+        console.warn('[AuthContext] Network error during user refresh, keeping credentials');
+      } else {
+        // Other errors - don't clear credentials, just log
+        console.warn('[AuthContext] Other error during user refresh, keeping credentials:', error.message);
       }
     }
   };
@@ -577,26 +596,58 @@ export const AuthProvider = ({ children, preloadedData }) => {
         return;
       }
       
-      // Fetch user profile, balance, and all users in parallel
-      const [userResponse, balanceResponse, usersResponse] = await Promise.all([
-        axios.get(`${API_BASE_URL}/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${currentToken}`,
-            'Content-Type': 'application/json'
+      // Fetch user profile, balance, and all users in parallel with retry logic
+      let userResponse, balanceResponse, usersResponse;
+      let retryCount = 0;
+      const maxRetries = 2; // Allow 1 retry for network issues
+      
+      while (retryCount < maxRetries) {
+        try {
+          console.log('🔍 [AuthContext] refreshAllData: Making API calls with token:', currentToken ? `${currentToken.substring(0, 20)}...` : 'NO TOKEN');
+          
+          [userResponse, balanceResponse, usersResponse] = await Promise.all([
+            axios.get(`${API_BASE_URL}/auth/me`, {
+              headers: {
+                'Authorization': `Bearer ${currentToken}`,
+                'Content-Type': 'application/json'
+              }
+            }),
+            axios.get(`${API_BASE_URL}/transaction/balance/current`, {
+              headers: {
+                'Authorization': `Bearer ${currentToken}`,
+                'Content-Type': 'application/json'
+              }
+            }),
+            fetch(`${API_BASE_URL}/admin/users/home`, {
+              headers: {
+                'Authorization': `Bearer ${currentToken}`
+              }
+            }).then(res => res.json())
+          ]);
+          
+          console.log('✅ [AuthContext] refreshAllData: All API calls successful');
+          // If we get here, all requests succeeded
+          break;
+        } catch (error) {
+          console.error(`❌ [AuthContext] refreshAllData: API call failed (attempt ${retryCount + 1}):`, {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            errorText: error.response?.data,
+            url: error.config?.url
+          });
+          
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            console.error(`❌ [AuthContext] refreshAllData: Failed after ${maxRetries} attempts:`, error);
+            throw error;
           }
-        }),
-        axios.get(`${API_BASE_URL}/transaction/balance/current`, {
-          headers: {
-            'Authorization': `Bearer ${currentToken}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-        fetch(`${API_BASE_URL}/admin/users/home`, {
-          headers: {
-            'Authorization': `Bearer ${currentToken}`
-          }
-        }).then(res => res.json())
-      ]);
+          
+          // Wait before retrying
+          const delay = 1000 * retryCount;
+          console.log(`🔍 [AuthContext] refreshAllData: Retrying in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
 
       if (userResponse.data) {
         console.log('[AuthContext] refreshAllData: User data updated');
@@ -622,7 +673,16 @@ export const AuthProvider = ({ children, preloadedData }) => {
       setDataReady(true); // Mark data as ready after successful refresh
     } catch (error) {
       console.error('[AuthContext] Error refreshing all data:', error);
-      setDataReady(false); // Mark data as not ready on error
+      
+      // Don't mark data as not ready for network or server errors
+      // Only mark as not ready for authentication errors
+      if (error.response?.status === 401) {
+        console.log('[AuthContext] Authentication error during refresh, marking data as not ready');
+        setDataReady(false);
+      } else {
+        console.warn('[AuthContext] Non-auth error during refresh, keeping data ready state');
+        // Keep current dataReady state for network/server errors
+      }
     } finally {
       setLoading(false);
     }
@@ -727,7 +787,7 @@ export const AuthProvider = ({ children, preloadedData }) => {
           refreshUser();
         });
         
-        // Listen for connection acceptance
+        // Listen for connection acceptance - let App.js handle the popup, we just update data
         SocketManager.socket?.on('connection_accepted', (data) => {
           // Immediately refresh from database to ensure we get the latest state
           refreshUser();
@@ -806,7 +866,6 @@ export const AuthProvider = ({ children, preloadedData }) => {
     return () => {
       SocketManager.socket?.off('like_update');
       SocketManager.socket?.off('connection_request_update');
-      SocketManager.onConnectionAccepted(() => {});
       SocketManager.socket?.off('connection_accepted');
       SocketManager.socket?.off('connection_canceled');
       SocketManager.socket?.off('connection_blocked');

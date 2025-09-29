@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, FlatList, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, FlatList, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FONTS } from '../../constants/font';
 import TopHeader from '../../components/TopHeader';
@@ -31,8 +31,15 @@ const BasicInfo = ({ navigation }) => {
       setName(user.username || '');
       setGender(user.gender || 'Male');
       setLocation(user.location || 'Abuja');
-      // Optionally set dob if available
-      // setDob(user.dateOfBirth || '');
+      // Set the actual date of birth from user data
+      if (user.dateOfBirth) {
+        // Convert date string to DD/MM/YYYY format
+        const date = new Date(user.dateOfBirth);
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const year = date.getFullYear();
+        setDob(`${day}/${month}/${year}`);
+      }
     }
   }, [user]);
 
@@ -67,9 +74,12 @@ const BasicInfo = ({ navigation }) => {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, 
+      paddingTop: 32,
+      backgroundColor: '#121212', 
+      }}>
       <TopHeader title="Basic info" onBack={() => navigation && navigation.goBack()} />
-      <View style={styles.formContainer}>
+      <View style={styles.container}>
         <Text style={styles.label}>Name</Text>
         <TextInput
           style={styles.input}
@@ -78,7 +88,7 @@ const BasicInfo = ({ navigation }) => {
           placeholder="Enter your name"
           placeholderTextColor="#888"
         />
-        <Text style={styles.label}>Date of birth</Text>
+        <Text style={styles.label}>Date of Birth</Text>
         <View style={styles.inputRow}>
           <TextInput
             style={[styles.input, { flex: 1 }]}
@@ -106,80 +116,74 @@ const BasicInfo = ({ navigation }) => {
       <TouchableOpacity style={styles.doneButton} onPress={handleSave} disabled={saving}>
         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.doneButtonText}>Done</Text>}
       </TouchableOpacity>
-
-      {/* Gender Modal */}
-      <Modal visible={genderModalVisible} transparent animationType="fade">
-        <View style={modalStyles.overlay}>
-          <View style={modalStyles.modalBox}>
-            <Text style={modalStyles.modalTitle}>Select Gender</Text>
-            {['Male', 'Female'].map(option => (
-              <TouchableOpacity
-                key={option}
-                style={modalStyles.radioRow}
-                onPress={() => { setGender(option); setGenderModalVisible(false); }}
-              >
-                <Ionicons
-                  name={gender === option ? 'radio-button-on' : 'radio-button-off'}
-                  size={22}
-                  color={gender === option ? '#EC066A' : '#888'}
-                  style={{ marginRight: 10 }}
-                />
-                <Text style={modalStyles.radioLabel}>{option}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => setGenderModalVisible(false)} style={modalStyles.closeBtn}>
-              <Text style={modalStyles.closeBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Location Modal */}
-      <Modal visible={locationModalVisible} transparent animationType="fade">
-        <View style={modalStyles.overlay}>
-          <View style={modalStyles.modalBox}>
-            <Text style={modalStyles.modalTitle}>Select State</Text>
-            <TextInput
-              style={modalStyles.searchInput}
-              placeholder="Search state..."
-              placeholderTextColor="#888"
-              value={locationSearch}
-              onChangeText={setLocationSearch}
-            />
-            <FlatList
-              data={filteredStates}
-              keyExtractor={item => item}
-              renderItem={({ item }) => (
+            {/* Gender Modal */}
+        <Modal visible={genderModalVisible} transparent animationType="fade">
+          <View style={modalStyles.overlay}>
+            <View style={modalStyles.modalBox}>
+              <Text style={modalStyles.modalTitle}>Select Gender</Text>
+              {['Male', 'Female'].map(option => (
                 <TouchableOpacity
-                  style={modalStyles.stateRow}
-                  onPress={() => { setLocation(item); setLocationModalVisible(false); setLocationSearch(''); }}
+                  key={option}
+                  style={modalStyles.radioRow}
+                  onPress={() => { setGender(option); setGenderModalVisible(false); }}
                 >
-                  <Text style={modalStyles.stateLabel}>{item}</Text>
+                  <Ionicons
+                    name={gender === option ? 'radio-button-on' : 'radio-button-off'}
+                    size={22}
+                    color={gender === option ? '#EC066A' : '#888'}
+                    style={{ marginRight: 10 }}
+                  />
+                  <Text style={modalStyles.radioLabel}>{option}</Text>
                 </TouchableOpacity>
-              )}
-              style={{ maxHeight: 250 }}
-              keyboardShouldPersistTaps="handled"
-            />
-            <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={modalStyles.closeBtn}>
-              <Text style={modalStyles.closeBtnText}>Cancel</Text>
-            </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={() => setGenderModalVisible(false)} style={modalStyles.closeBtn}>
+                <Text style={modalStyles.closeBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </View>
-  );
+        </Modal>
+
+        {/* Location Modal */}
+        <Modal visible={locationModalVisible} transparent animationType="fade">
+          <View style={modalStyles.overlay}>
+            <View style={modalStyles.modalBox}>
+              <Text style={modalStyles.modalTitle}>Select State</Text>
+              <TextInput
+                style={modalStyles.searchInput}
+                placeholder="Search state..."
+                placeholderTextColor="#888"
+                value={locationSearch}
+                onChangeText={setLocationSearch}
+              />
+              <FlatList
+                data={filteredStates}
+                keyExtractor={item => item}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={modalStyles.stateRow}
+                    onPress={() => { setLocation(item); setLocationModalVisible(false); setLocationSearch(''); }}
+                  >
+                    <Text style={modalStyles.stateLabel}>{item}</Text>
+                  </TouchableOpacity>
+                )}
+                style={{ maxHeight: 250 }}
+                keyboardShouldPersistTaps="handled"
+              />
+              <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={modalStyles.closeBtn}>
+                <Text style={modalStyles.closeBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingTop: 32,
-    paddingHorizontal: 4,
-  },
-  formContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: 20,
   },
   label: {
     color: '#fff',

@@ -428,7 +428,7 @@ exports.getFilteredUsersForHome = async (req, res) => {
 
     // Verified only filter
     if (verifiedOnly) {
-      filterQuery.verificationStatus = 'true';
+      filterQuery.verificationStatus = 'verified';
     }
 
     // Education level filter

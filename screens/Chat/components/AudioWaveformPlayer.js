@@ -85,6 +85,84 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const loadAudio = async (audioUri) => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound: newSound } = await loadAudioWithRetry(
+        audioUri,
+        { shouldPlay: false }, // Don't auto-play, we'll control it
+        3 // 3 retries
+      );
+      
+      // Set up status updates
+      newSound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded) {
+          setCurrentPosition(status.positionMillis / 1000);
+          setAudioDuration(status.durationMillis / 1000);
+          
+          if (status.didJustFinish) {
+            setIsPlaying(false);
+            setCurrentPosition(0);
+          }
+        }
+      });
+      
+      return newSound;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const reloadAudio = async () => {
+    try {
+      // Clean up existing sound
+      if (soundRef.current) {
+        try {
+          await soundRef.current.unloadAsync();
+        } catch (cleanupError) {
+          console.log('Error during sound cleanup:', cleanupError);
+        }
+        soundRef.current = null;
+      }
+      
+      // Reset state
+      setIsPlaying(false);
+      setCurrentPosition(0);
+      setError(null);
+      
+      // Load fresh audio
+      const audioUri = getOptimizedAudioUri(uri);
+      const newSound = await loadAudio(audioUri);
+      soundRef.current = newSound;
+      
+      return newSound;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const handleSeek = async (event) => {
+    if (!soundRef.current || !soundRef.current._loaded || audioDuration === 0) {
+      return;
+    }
+
+    try {
+      const { locationX } = event.nativeEvent;
+      const waveformWidth = 38 * 3.7; // Approximate width of waveform (38 bars * (1.7 width + 2 margin))
+      const seekRatio = Math.max(0, Math.min(1, locationX / waveformWidth));
+      const seekPosition = seekRatio * audioDuration;
+      
+      await soundRef.current.setPositionAsync(seekPosition * 1000);
+      setCurrentPosition(seekPosition);
+    } catch (error) {
+      console.error('Seek error:', error);
+    }
+  };
+
   const handlePlayPause = async () => {
     if (!uri) {
       setError('No audio URL provided');
@@ -122,11 +200,14 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
         }),
       ]).start();
 
-      if (soundRef.current) {
+      if (soundRef.current && soundRef.current._loaded) {
         if (isPlaying) {
           await soundRef.current.pauseAsync();
           setIsPlaying(false);
         } else {
+          // Reset position to beginning when starting playback
+          await soundRef.current.setPositionAsync(0);
+          setCurrentPosition(0);
           await soundRef.current.playAsync();
           setIsPlaying(true);
         }
@@ -134,11 +215,14 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
         // Check if we have a cached version
         let soundToUse = getPreloadedAudio(uri);
         
-        if (soundToUse) {
+        if (soundToUse && soundToUse._loaded) {
           // Use cached audio
           soundRef.current = soundToUse;
-          setIsPlaying(true);
+          
+          // Reset position to beginning when starting playback
+          await soundToUse.setPositionAsync(0);
           setCurrentPosition(0);
+          setIsPlaying(true);
           
           // Set up status updates
           soundToUse.setOnPlaybackStatusUpdate((status) => {
@@ -149,50 +233,52 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
               if (status.didJustFinish) {
                 setIsPlaying(false);
                 setCurrentPosition(0);
-                soundRef.current = null;
+                // Don't set soundRef.current to null, just mark as finished
               }
             }
           });
           
           await soundToUse.playAsync();
         } else {
-          // Load new audio with retry mechanism
-          const audioUri = getOptimizedAudioUri(uri);
-          
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            playsInSilentModeIOS: true,
-          });
-
-          const { sound: newSound } = await loadAudioWithRetry(
-            audioUri,
-            { shouldPlay: true },
-            3 // 3 retries
-          );
-          
+          // Load new audio
+          const newSound = await loadAudio(audioUri);
           soundRef.current = newSound;
-          setIsPlaying(true);
+          
+          // Ensure new audio starts from beginning
+          await newSound.setPositionAsync(0);
+          setCurrentPosition(0);
           
           // Cache the audio for future use
           await cacheAudioUri(uri, audioUri);
           await preloadAudio(uri, audioUri);
           
-          newSound.setOnPlaybackStatusUpdate((status) => {
-            if (status.isLoaded) {
-              setCurrentPosition(status.positionMillis / 1000);
-              setAudioDuration(status.durationMillis / 1000);
-              
-              if (status.didJustFinish) {
-                setIsPlaying(false);
-                setCurrentPosition(0);
-                soundRef.current = null;
-              }
-            }
-          });
+          // Now play the audio
+          await newSound.playAsync();
+          setIsPlaying(true);
         }
       }
     } catch (err) {
       console.error('Audio playback error:', err);
+      
+      // Check if it's a "sound is not loaded" error
+      if (err.message?.includes('sound is not loaded') || err.message?.includes('Cannot complete operation')) {
+        console.log('🔄 [AUDIO] Sound not loaded, attempting to reload...');
+        try {
+          // Try to reload the audio
+          await reloadAudio();
+          // If reload successful, try to play again
+          if (soundRef.current) {
+            // Ensure audio starts from beginning after reload
+            await soundRef.current.setPositionAsync(0);
+            setCurrentPosition(0);
+            await soundRef.current.playAsync();
+            setIsPlaying(true);
+            return; // Exit early if successful
+          }
+        } catch (reloadError) {
+          console.error('Failed to reload audio:', reloadError);
+        }
+      }
       
       // Provide specific error messages based on error type
       let errorMessage = 'Failed to play audio. Please try again.';
@@ -263,7 +349,11 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
           </Animated.View>
         </TouchableOpacity>
 
-        <View style={styles.waveformContainer}>
+        <TouchableOpacity 
+          style={styles.waveformContainer}
+          onPress={handleSeek}
+          activeOpacity={0.7}
+        >
           <View style={styles.waveform}>
             {waveformPattern.map((height, index) => {
               const shouldBeColored = (index / waveformPattern.length) <= progress;
@@ -271,19 +361,18 @@ const AudioWaveformPlayer = ({ uri, isSent = false }) => {
                 <View
                   key={index}
                   style={{
-                    width: 1.5,
+                    width: 1.7,
                     height,
                     backgroundColor: isSent 
-                      ? (shouldBeColored ? '#fff' : 'rgba(255, 255, 255, 0.3)')
-                      : (shouldBeColored ? '#333' : 'rgba(51, 51, 51, 0.3)'),
-                    marginHorizontal: 0.5,
+                      ? (shouldBeColored ? '#fff' : 'rgba(255, 255, 255, 0.5)')
+                      : (shouldBeColored ? '#333' : 'rgba(51, 51, 51, 0.5)'),
+                    marginHorizontal: 1,
                   }}
                 />
               );
             })}
           </View>
-
-        </View>
+        </TouchableOpacity>
         
         {/* Error display */}
         {error && (

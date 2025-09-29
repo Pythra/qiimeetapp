@@ -26,7 +26,11 @@ const AppStack = ({ initialRouteName }) => {
       />
       <Stack.Screen name="Landing" component={LandingScreen} />
       <Stack.Screen name="Auth" component={AuthStack} />
-      <Stack.Screen name="Onboarding" component={OnboardingStack} />
+      <Stack.Screen 
+        name="Onboarding" 
+        component={OnboardingStack}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="MainTabs" component={TabNavigator} />
       <Stack.Screen name="Bio" component={Bio} />
       <Stack.Screen name="Location" component={Location} />

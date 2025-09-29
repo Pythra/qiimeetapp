@@ -5,7 +5,7 @@ import { FONTS } from '../constants/font';
 
 const IncomingConnectionModal = ({ isVisible, user, onAccept, onClose }) => {
   const getImageSource = (imagePath) => {
-    const cloudFrontUrl = 'https://d11n4tndq0o4wh.cloudfront.net';
+    const cloudFrontUrl = 'https://dk665xezaubcy.cloudfront.net';
     if (!imagePath) return require('../assets/model.jpg');
     if (imagePath.startsWith('http')) return { uri: imagePath };
     return { uri: `${cloudFrontUrl}/uploads/images/${imagePath}` };

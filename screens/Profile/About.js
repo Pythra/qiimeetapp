@@ -20,11 +20,7 @@ const About = ({ navigation }) => {
           <TouchableOpacity
             key={option.label}
             style={[styles.optionRow, idx !== 0 && { marginTop: 16 }]}
-            onPress={
-              option.route === 'AboutQiimeet'
-                ? () => navigation.navigate('AboutQiimeet')
-                : undefined // Add navigation for other routes if needed
-            }
+            onPress={() => navigation.navigate(option.route)}
             activeOpacity={0.7}
           >
             <Text style={styles.optionLabel}>{option.label}</Text>
@@ -39,6 +35,7 @@ const About = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    paddingTop: 32,
     backgroundColor: '#121212', 
   },
   content: {

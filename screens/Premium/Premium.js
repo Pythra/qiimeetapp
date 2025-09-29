@@ -20,7 +20,7 @@ const getResponsiveFontSize = (phoneSize, tabletSize) => isTablet ? tabletSize :
 const getResponsiveSpacing = (phoneSpacing, tabletSpacing) => isTablet ? tabletSpacing : phoneSpacing;
 
 const PremiumScreen = ({ navigation, route }) => {
-  const { balance, refreshBalance, updateBalance, user: currentUser, refreshUser } = useAuth();
+  const { balance, refreshBalance, updateBalance, user: currentUser, refreshUser, updateUser } = useAuth();
   const [verificationStatus, setVerificationStatus] = useState('false');
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false);
   const [limitModalVisible, setLimitModalVisible] = useState(false);
@@ -119,7 +119,7 @@ const PremiumScreen = ({ navigation, route }) => {
     }
     
     // If verification is verified, allow access to view/update verification
-    if (verificationStatus === 'verified' || verificationStatus === 'true') {
+    if (verificationStatus === 'verified') {
       navigation.navigate('ProfileVerification');
       return;
     }
@@ -151,13 +151,7 @@ const PremiumScreen = ({ navigation, route }) => {
 
   // Handle Pay for Connection navigation
   const handlePayForConnection = () => {
-    // Check if user already has a connection or pending request
-    if (hasExistingConnectionOrRequest()) {
-      setLimitModalVisible(true);
-      return;
-    }
-    
-    // If no existing connections/requests, allow navigation
+    // Navigate directly to PayForConnection screen without checking connection limits
     navigation.navigate('PayForConnection');
   };
 
@@ -339,6 +333,47 @@ const PremiumScreen = ({ navigation, route }) => {
     }
   }, [currentUser?.verificationStatus]);
 
+  // REAL-TIME SUBSCRIPTION STATUS REFRESH: Fetch fresh user data every 3 seconds to stay in sync with database
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const refreshInterval = setInterval(async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (!token) return;
+
+        const response = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const freshUserData = await response.json();
+          const currentSubscriptionStatus = currentUser.isSubscribed;
+          const freshSubscriptionStatus = freshUserData.isSubscribed;
+          const currentExpiryDate = currentUser.subscriptionExpiryDate;
+          const freshExpiryDate = freshUserData.subscriptionExpiryDate;
+
+          const subscriptionChanged = currentSubscriptionStatus !== freshSubscriptionStatus || 
+                                   currentExpiryDate !== freshExpiryDate;
+
+          if (subscriptionChanged) {
+            // Update the user context with fresh data
+            updateUser(freshUserData);
+          }
+        }
+      } catch (error) {
+        // Silently handle errors
+      }
+    }, 3000); // Every 3 seconds
+
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [currentUser, updateUser]);
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView 
@@ -420,8 +455,19 @@ const PremiumScreen = ({ navigation, route }) => {
         <View style={styles.premiumSection}>
           <View style={styles.cardContainer}>
           <Text style={styles.sectionTitle}>Get Premium</Text>
-            <TouchableOpacity style={styles.subscribeButton} onPress={() => navigation.navigate('SubscriptionScreen')}>
-              <Text style={styles.subscribeText}>Subscribe</Text>
+            <TouchableOpacity 
+              style={[
+                styles.subscribeButton,
+                currentUser?.isSubscribed && new Date(currentUser.subscriptionExpiryDate) > new Date() && styles.subscribedButton
+              ]} 
+              onPress={() => navigation.navigate('SubscriptionScreen')}
+            >
+              <Text style={[
+                styles.subscribeText,
+                currentUser?.isSubscribed && new Date(currentUser.subscriptionExpiryDate) > new Date() && styles.subscribedText
+              ]}>
+                {currentUser?.isSubscribed && new Date(currentUser.subscriptionExpiryDate) > new Date() ? 'Subscribed ✓' : 'Subscribe'}
+              </Text>
             </TouchableOpacity>
 
 
@@ -522,6 +568,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 16, 
+    fontWeight: '600',
     flexShrink: 1, // Allow text to shrink and wrap
     flexWrap: 'wrap', // Enable wrapping
   },
@@ -595,6 +642,14 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   subscribeText: {
+    color: '#fff',
+    fontSize: getResponsiveFontSize(24), 
+    fontWeight: '700',
+  },
+  subscribedButton: {
+    backgroundColor: '#ec066a', // Keep original pink color for subscribed state
+  },
+  subscribedText: {
     color: '#fff',
     fontSize: getResponsiveFontSize(24), 
     fontWeight: '700',

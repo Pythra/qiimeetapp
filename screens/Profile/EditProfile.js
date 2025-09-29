@@ -392,11 +392,26 @@ const EditProfile = (props) => {
           </View>
         </View>
         {/* Verify Profile */}
-        <TouchableOpacity style={styles.verifyRow}>
+        <TouchableOpacity 
+          style={styles.verifyRow}
+          onPress={() => navigation.navigate('Premium', { screen: 'ProfileVerification' })}
+        >
           <Image source={SharpCheck} style={{ width: 16, height: 16, marginRight: 8 }} />
           <Text style={styles.verifyText}>Verify my profile</Text>
-          <View style={styles.notVerifiedTag}>
-            <Text style={styles.notVerifiedText}>Not verified</Text>
+          <View style={[
+            styles.notVerifiedTag,
+            user?.verificationStatus === 'verified' && styles.verifiedTag,
+            user?.verificationStatus === 'pending' && styles.pendingTag
+          ]}>
+            <Text style={[
+              styles.notVerifiedText,
+              user?.verificationStatus === 'verified' && styles.verifiedText,
+              user?.verificationStatus === 'pending' && styles.pendingText
+            ]}>
+              {user?.verificationStatus === 'verified' ? 'Verified' : 
+               user?.verificationStatus === 'pending' ? 'Pending' : 
+               user?.verificationStatus === 'rejected' ? 'Rejected' : 'Not verified'}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" style={{ marginLeft: 8 }} />
         </TouchableOpacity>
@@ -420,9 +435,9 @@ const EditProfile = (props) => {
             <Text style={styles.placeholderText}>{bio || user.bio || 'Add bio'}</Text>
           </TouchableOpacity>
         </View>
-        {/* Relationship goals */}
+        {/* Relationship Goals */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Relationship goals</Text>
+          <Text style={styles.sectionLabel}>Relationship Goals</Text>
           <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('RelationshipGoals')}>
             <Text style={styles.placeholderText}>{goal || user.goal || 'Add your goal'}</Text>
             <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
@@ -432,7 +447,12 @@ const EditProfile = (props) => {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Work</Text>
           <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Career')}>
-            <Text style={styles.placeholderText}>{career || work.jobTitle || user.career || 'Add your work'}</Text>
+            <View style={{flex: 1}}>
+              <Text style={styles.placeholderText}>
+                {work.jobTitle && work.company ? `${work.jobTitle} at ${work.company}` : 
+                 work.jobTitle || work.company || user.career || 'Add your work'}
+              </Text>
+            </View>
             <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
           </TouchableOpacity>
         </View>
@@ -440,7 +460,11 @@ const EditProfile = (props) => {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Education</Text>
           <TouchableOpacity style={styles.sectionRow} onPress={() => navigation.navigate('Education')}>
-            <Text style={styles.placeholderText}>{education || user.education || 'Add your education'}</Text>
+            <View style={{flex: 1}}>
+              <Text style={styles.placeholderText}>
+                {education || user.education || 'Add your education'}
+              </Text>
+            </View>
             <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
           </TouchableOpacity>
         </View>
@@ -487,7 +511,7 @@ const EditProfile = (props) => {
             <TouchableOpacity style={styles.moreAboutItem} onPress={() => navigation.navigate('Career')}>
               <MaterialIcons name="work" size={20} color="#fff" style={styles.moreAboutIcon} />
               <Text style={styles.moreAboutText}>Career</Text>
-              <Text style={styles.moreAboutValue}>{user.career || 'Empty'}</Text>
+              <Text style={styles.moreAboutValue}>{career || user.career || 'Empty'}</Text>
               <Ionicons name="chevron-forward" size={24} color="rgba(255, 255, 255, 0.5)" />
             </TouchableOpacity>
           </View>
@@ -515,7 +539,7 @@ const EditProfile = (props) => {
             <TouchableOpacity onPress={() => navigation.navigate('Lifestyle')}><Text style={styles.editText}>Edit</Text></TouchableOpacity>
           </View>
           <View style={styles.chipContainer}>
-            {user.lifestyle && user.lifestyle.length > 0 ? (
+            {(lifestyle && lifestyle.length > 0) || (user.lifestyle && user.lifestyle.length > 0) ? (
               (lifestyle && lifestyle.length > 0 ? lifestyle : user.lifestyle).map((item, idx) => (
                 <View key={idx} style={styles.chip}><Text style={styles.chipText}>{item}</Text></View>
               ))
@@ -599,6 +623,30 @@ const styles = StyleSheet.create({
     color: '#aaa',
     fontSize: 12,
     fontFamily: FONTS.regular,
+  },
+  verifiedTag: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+  },
+  verifiedText: {
+    color: '#fff',
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    fontWeight: '600',
+  },
+  pendingTag: {
+    backgroundColor: '#FF9800',
+    borderRadius: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+  },
+  pendingText: {
+    color: '#fff',
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    fontWeight: '600',
   },
   section: {
     marginBottom: 10,

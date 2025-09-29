@@ -131,17 +131,30 @@ export async function handleSend({
     return;
   }
 
-  // Add a temporary "sending" message
+  // Add a temporary message with "sent" status immediately for better UX
   const tempMessageId = `temp_${Date.now()}`;
   const tempMessage = {
     id: tempMessageId,
     text: message,
     time: new Date(),
     sent: true,
-    status: 'sending',
+    status: 'sent', // Show as sent immediately
     isTemp: true, // Flag to identify temporary messages
+    // Add stable properties to prevent re-renders
+    senderId: user._id,
+    receiverId: otherUserId,
+    chatId: chatId,
+    messageType: 'text',
+    isOptimistic: true, // Flag to indicate this is optimistic UI
   };
   setMessages(prev => [...prev, tempMessage]);
+
+  // Clear the input immediately for better UX
+  setMessage('');
+  setIsTyping(false);
+  if (emitTypingStatus) {
+    emitTypingStatus(false);
+  }
 
   try {
     const token = await AsyncStorage.getItem('token');
@@ -188,14 +201,33 @@ export async function handleSend({
       throw new Error('Failed to send message');
     }
 
-    setMessage('');
-    setIsTyping(false); 
-    if (emitTypingStatus) {
-      emitTypingStatus(false);
-    }
+    const responseData = await response.json();
+    const sentMessage = responseData.messageData || responseData;
+
+    // Update the temporary message with the real data - minimal update to prevent flickering
+    setMessages(prev => prev.map(msg => 
+      msg.id === tempMessageId ? {
+        ...msg,
+        id: sentMessage._id,
+        status: 'sent',
+        isTemp: false,
+        isOptimistic: false, // Remove optimistic flag
+        isRead: sentMessage.isRead || false,
+        isDelivered: sentMessage.isDelivered || false,
+        // Preserve exact same references for stable properties
+        text: msg.text,
+        time: msg.time,
+        sent: msg.sent,
+        senderId: msg.senderId,
+        receiverId: msg.receiverId,
+        chatId: msg.chatId,
+        messageType: msg.messageType,
+      } : msg
+    ));
   } catch (err) {
     console.error('Error sending message:', err);
     Alert.alert('Error', 'Failed to send message');
+    // Remove the temporary message on error
     setMessages(prev => prev.filter(msg => msg.id !== tempMessageId));
   }
 }
@@ -237,12 +269,15 @@ export async function handleGallerySelect({
         image: imageAsset.uri,
         sent: true,
         time: new Date(),
-        status: 'sending',
+        status: 'sent', // Show as sent immediately
         isTemp: true,
         // Add stable properties to prevent unnecessary re-renders
         senderId: user._id,
         receiverId: otherUserId,
         chatId: chatId,
+        messageType: 'image',
+        originalTime: new Date(), // Keep original time reference
+        isOptimistic: true, // Flag to indicate this is optimistic UI
       };
       setMessages((prev) => [...prev, tempMessage]);
       setPlusModalVisible(false);
@@ -362,13 +397,14 @@ export async function handleGallerySelect({
             id: newMessage._id,
             image: imageUrl,
             sent: true,
-            time: new Date(newMessage.timestamp),
+            time: msg.originalTime || msg.time, // Keep original time
             status: newMessage.isRead ? 'read' : (newMessage.isDelivered ? 'delivered' : 'sent'),
-            senderId: newMessage.senderId,
-            isRead: newMessage.isRead,
-            isDelivered: newMessage.isDelivered,
+            senderId: msg.senderId, // Keep original senderId
+            isRead: newMessage.isRead || false,
+            isDelivered: newMessage.isDelivered || false,
             isTemp: false, // Mark as no longer temporary
             messageType: 'image',
+            isOptimistic: false, // Remove optimistic flag but keep UI stable
             // Preserve exact same references for stable properties
             receiverId: msg.receiverId,
             chatId: msg.chatId,

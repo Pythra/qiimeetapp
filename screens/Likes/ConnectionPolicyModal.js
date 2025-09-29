@@ -5,9 +5,11 @@ import { FONTS } from '../../constants/font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../env';
 import notificationService from '../../utils/notificationService';
+import { useAuth } from '../../components/AuthContext';
 
 const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'request', targetUserId, onConnectionLimit }) => {
   const [isChecked, setIsChecked] = useState(false);
+  const { updateUser } = useAuth();
 
 
 
@@ -29,6 +31,11 @@ const ConnectionPolicyModal = ({ visible, onClose, onAccept, modalType = 'reques
         });
         const resData = await res.json().catch(() => ({}));
         if (res.ok) {
+          // Update user data in AuthContext with the response data
+          if (resData && updateUser) {
+            console.log('🔄 [ConnectionPolicyModal] Updating user data after connection sent');
+            updateUser(resData);
+          }
           onAccept();
         } else if (res.status === 403 && resData.code === 'NO_CONNECTIONS') {
           onClose();

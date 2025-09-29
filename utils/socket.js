@@ -88,6 +88,9 @@ class SocketManager {
       if (this.userId) {
         console.log('[SocketManager] Ensuring user room is joined after connection');
         this.joinUserRoom(this.userId);
+        
+        // Emit online status when connecting
+        this.emitOnlineStatus();
       }
     });
 
@@ -97,6 +100,9 @@ class SocketManager {
       this.isConnecting = false;
       this.stopHeartbeat();
       this.clearConnectionTimeout();
+      
+      // Emit offline status when disconnecting
+      this.emitOfflineStatus();
 
       if (!this.isManualDisconnect) {
         this.handleDisconnection(reason);
@@ -140,7 +146,6 @@ class SocketManager {
     this.heartbeatInterval = setInterval(() => {
       if (this.socket && this.isConnected) {
         this.socket.emit('ping');
-        console.log('Sent ping to server');
       }
     }, 30000); // Send ping every 30 seconds
   }
@@ -155,8 +160,6 @@ class SocketManager {
   handleDisconnection(reason) {
     if (this.isManualDisconnect) return;
 
-    console.log('Handling disconnection:', reason);
-    
     // Don't reconnect if it's a manual disconnect or server shutdown
     if (reason === 'io server disconnect' || reason === 'io client disconnect') {
       return;
@@ -168,7 +171,6 @@ class SocketManager {
   handleConnectionError() {
     if (this.isManualDisconnect) return;
 
-    console.log('Handling connection error');
     this.scheduleReconnection();
   }
 
@@ -178,7 +180,6 @@ class SocketManager {
     }
 
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnection attempts reached');
       return;
     }
 
@@ -210,20 +211,17 @@ class SocketManager {
   // Force rejoin user room - useful for ensuring room membership
   forceRejoinUserRoom() {
     if (this.userId && this.socket && this.isConnected) {
-      console.log('[SocketManager] Force rejoining user room:', this.userId);
       this.socket.emit('join_user_room', this.userId);
       
       // Verify room join multiple times to ensure reliability
       setTimeout(() => {
         if (this.socket && this.isConnected) {
-          console.log('[SocketManager] Verifying user room join (1s delay)');
           this.socket.emit('join_user_room', this.userId);
         }
       }, 1000);
       
       setTimeout(() => {
         if (this.socket && this.isConnected) {
-          console.log('[SocketManager] Verifying user room join (3s delay)');
           this.socket.emit('join_user_room', this.userId);
         }
       }, 3000);
@@ -242,16 +240,12 @@ class SocketManager {
   joinChat(chatId) {
     if (this.socket && this.isConnected) {
       this.socket.emit('join_chat', chatId);
-      console.log(`Joined chat: ${chatId}`);
-    } else {
-      console.log('Cannot join chat: socket not connected');
     }
   }
 
   leaveChat(chatId) {
     if (this.socket && this.isConnected) {
       this.socket.emit('leave_chat', chatId);
-      console.log(`Left chat: ${chatId}`);
     }
   }
 
@@ -267,7 +261,6 @@ class SocketManager {
     if (this.socket) {
       this.socket.off('user_typing'); // Remove existing listeners
       this.socket.on('user_typing', (data) => {
-        console.log('[SocketManager] Received user_typing event:', data);
         callback(data);
       });
       this.eventListeners.set('user_typing', callback);
@@ -284,35 +277,38 @@ class SocketManager {
 
   emitTyping(chatId, isTyping) {
     if (this.socket && this.isConnected) {
-      console.log('[SocketManager] Emitting', isTyping ? 'typing_start' : 'typing_stop', 'for chat', chatId);
       this.socket.emit(isTyping ? 'typing_start' : 'typing_stop', { chatId });
-    } else {
-      console.log('Cannot emit typing: socket not connected');
     }
   }
 
   // Add this method to join the user-specific room
   joinUserRoom(userId) {
+    console.log('🔍 [SocketManager] joinUserRoom called with userId:', userId);
+    console.log('🔍 [SocketManager] Socket connected:', this.isConnected);
+    console.log('🔍 [SocketManager] Socket exists:', !!this.socket);
+    
     if (this.socket && this.isConnected && userId) {
+      console.log('🔍 [SocketManager] Emitting join_user_room for userId:', userId);
       this.socket.emit('join_user_room', userId);
-      console.log(`[SocketManager] Joined user room: user_${userId}`);
+      
+      // Emit online status when joining room
+      this.emitOnlineStatus();
       
       // Verify room join was successful
       setTimeout(() => {
         if (this.socket && this.isConnected) {
-          console.log(`[SocketManager] Verifying user room join for: user_${userId}`);
+          console.log('🔍 [SocketManager] Re-emitting join_user_room for userId:', userId);
           this.socket.emit('join_user_room', userId);
         }
       }, 1000);
     } else {
-      console.log(`[SocketManager] Cannot join user room: socket=${!!this.socket}, connected=${this.isConnected}, userId=${userId}`);
+      console.log('🔍 [SocketManager] Cannot join user room - socket not ready or userId missing');
     }
   }
 
   // Method to set userId
   setUserId(userId) {
     this.userId = userId;
-    console.log('[SocketManager] UserId set to:', userId);
     // If already connected, join the user room
     if (this.socket && this.isConnected && userId) {
       this.joinUserRoom(userId);
@@ -336,22 +332,60 @@ class SocketManager {
   }
 
   onConnectionAccepted(callback) {
+    console.log('🔍 [SocketManager] onConnectionAccepted called');
+    console.log('🔍 [SocketManager] Socket exists:', !!this.socket);
+    console.log('🔍 [SocketManager] Socket connected:', this.isConnected);
+    
     if (this.socket) {
-      console.log('[SocketManager] Setting up connection_accepted listener');
-      this.socket.off('connection_accepted');
-      this.socket.on('connection_accepted', (data) => {
-        console.log('[SocketManager] Received connection_accepted event:', data);
-        callback(data);
-      });
-      this.eventListeners.set('connection_accepted', callback);
+      // Initialize listeners array if it doesn't exist
+      if (!this.connectionAcceptedListeners) {
+        this.connectionAcceptedListeners = [];
+        // Set up the socket listener only once
+        this.socket.off('connection_accepted');
+        this.socket.on('connection_accepted', (data) => {
+          console.log('🔍 [SocketManager] Received connection_accepted event:', data);
+          console.log('🔍 [SocketManager] Number of listeners:', this.connectionAcceptedListeners.length);
+          
+          // Call all registered listeners
+          this.connectionAcceptedListeners.forEach((listener, index) => {
+            try {
+              console.log(`🔍 [SocketManager] Calling listener ${index + 1}/${this.connectionAcceptedListeners.length}`);
+              listener(data);
+            } catch (error) {
+              console.error('🔍 [SocketManager] Error in connection_accepted listener:', error);
+            }
+          });
+        });
+      }
+      
+      // Check if callback already exists to prevent duplicates
+      if (!this.connectionAcceptedListeners.includes(callback)) {
+        this.connectionAcceptedListeners.push(callback);
+        console.log('🔍 [SocketManager] Added connection_accepted listener. Total listeners:', this.connectionAcceptedListeners.length);
+      } else {
+        console.log('🔍 [SocketManager] Callback already exists, skipping duplicate');
+      }
     } else {
-      console.warn('[SocketManager] Cannot set up connection_accepted listener - socket not connected');
+      console.warn('🔍 [SocketManager] Cannot set up connection_accepted listener - socket not connected');
+    }
+  }
+
+  offConnectionAccepted(callback) {
+    if (this.connectionAcceptedListeners) {
+      const index = this.connectionAcceptedListeners.indexOf(callback);
+      if (index > -1) {
+        this.connectionAcceptedListeners.splice(index, 1);
+        console.log('🔍 [SocketManager] Removed connection_accepted listener. Total listeners:', this.connectionAcceptedListeners.length);
+      }
     }
   }
 
   emitCallUser(data) {
     if (this.socket && this.isConnected) {
+      console.log('📞 [SocketManager] Emitting call_user event:', data);
       this.socket.emit('call_user', data);
+    } else {
+      console.log('📞 [SocketManager] Cannot emit call_user - socket not connected');
     }
   }
 
@@ -390,6 +424,22 @@ class SocketManager {
     };
   }
 
+  // Emit online status
+  emitOnlineStatus() {
+    if (this.socket && this.isConnected && this.userId) {
+      console.log('[SocketManager] Emitting online status for user:', this.userId);
+      this.socket.emit('user_online', { userId: this.userId });
+    }
+  }
+
+  // Emit offline status
+  emitOfflineStatus() {
+    if (this.socket && this.isConnected && this.userId) {
+      console.log('[SocketManager] Emitting offline status for user:', this.userId);
+      this.socket.emit('user_offline', { userId: this.userId });
+    }
+  }
+
   // Method to force reconnection
   async reconnect() {
     console.log('Forcing reconnection');
@@ -401,6 +451,10 @@ class SocketManager {
 
   disconnect() {
     console.log('Disconnecting socket manually');
+    
+    // Emit offline status before disconnecting
+    this.emitOfflineStatus();
+    
     this.isManualDisconnect = true;
     this.isConnecting = false;
     

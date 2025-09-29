@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Dimensions, TouchableOpacity } from 'react-native';
 import OnboardingTemplate from './OnboardingTemplate';
 import { FONTS } from '../../../constants/font';
 import axios from 'axios';
@@ -10,24 +10,22 @@ const { width } = Dimensions.get('window');
 const ITEM_HEIGHT = 50;
 
 const DateOfBirthScreen = ({ navigation }) => {
-  const [selectedDay, setSelectedDay] = useState(31); // Default to last day
-  const [selectedMonth, setSelectedMonth] = useState(12); // Default to last month
-  const [selectedYear, setSelectedYear] = useState(2007); // Default to earliest year
+  const [selectedDay, setSelectedDay] = useState(31);
+  const [selectedMonth, setSelectedMonth] = useState(12);
+  const [selectedYear, setSelectedYear] = useState(2007);
 
-  const dayScrollRef = useRef(null);
-  const monthScrollRef = useRef(null);
-  const yearScrollRef = useRef(null);
+  const dayFlatListRef = useRef(null);
+  const monthFlatListRef = useRef(null);
+  const yearFlatListRef = useRef(null);
 
   // Generate arrays for the picker
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  // Generate years from 2007 down to 1950 (reversed order for upward scrolling)
   const years = Array.from({ length: 2007 - 1950 + 1 }, (_, i) => 2007 - i).reverse();
 
   const handleNext = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      // Format date as YYYY-MM-DD
       const dob = `${selectedYear}-${formatNumber(selectedMonth)}-${formatNumber(selectedDay)}`;
       const res = await axios.put(
         `${API_BASE_URL}/auth/update`,
@@ -38,40 +36,74 @@ const DateOfBirthScreen = ({ navigation }) => {
       navigation.navigate('Goals');
     } catch (error) {
       console.error('Error updating dateOfBirth:', error);
-      navigation.navigate('Goals'); // Optionally still navigate
+      navigation.navigate('Goals');
     }
   };
 
   const formatNumber = (num) => num.toString().padStart(2, '0');
 
-  const renderPickerColumn = (data, selectedValue, onValueChange, scrollRef, formatter = (val) => val) => {
-    const handleScroll = (event) => {
+  const renderPickerColumn = (data, selectedValue, onValueChange, flatListRef, formatter = (val) => val) => {
+    const getItemLayout = (data, index) => ({
+      length: ITEM_HEIGHT,
+      offset: ITEM_HEIGHT * index,
+      index,
+    });
+
+    const handleScrollEnd = (event) => {
       const y = event.nativeEvent.contentOffset.y;
-      const index = Math.round(y / ITEM_HEIGHT);
+      const index = Math.max(0, Math.min(Math.round(y / ITEM_HEIGHT), data.length - 1));
       const newValue = data[index];
+      
       if (newValue && newValue !== selectedValue) {
         onValueChange(newValue);
       }
     };
 
-    const scrollToValue = (value) => {
-      const index = data.indexOf(value);
-      if (index !== -1 && scrollRef.current) {
-        scrollRef.current.scrollTo({
-          y: index * ITEM_HEIGHT,
-          animated: true,
-        });
-      }
+    const renderItem = ({ item, index }) => {
+      const selectedIndex = data.indexOf(selectedValue);
+      const isSelected = item === selectedValue;
+      const isAdjacent = Math.abs(index - selectedIndex) === 1;
+      
+      const handleTap = () => {
+        onValueChange(item);
+        // Scroll to the tapped item
+        if (flatListRef.current) {
+          flatListRef.current.scrollToIndex({
+            index,
+            animated: true,
+            viewPosition: 0.5,
+          });
+        }
+      };
+      
+      return (
+        <TouchableOpacity 
+          style={styles.pickerItem}
+          onPress={handleTap}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[
+              styles.pickerText,
+              isSelected && styles.pickerTextSelected,
+              isAdjacent && styles.pickerTextAdjacent
+            ]}
+          >
+            {formatter(item)}
+          </Text>
+        </TouchableOpacity>
+      );
     };
 
     React.useEffect(() => {
-      // Initial scroll to selected value - scroll to bottom positions for all pickers
+      // Initial scroll to selected value
       setTimeout(() => {
         const index = data.indexOf(selectedValue);
-        if (index !== -1 && scrollRef.current) {
-          scrollRef.current.scrollTo({
-            y: index * ITEM_HEIGHT,
-            animated: false, // No animation for initial positioning
+        if (index !== -1 && flatListRef.current) {
+          flatListRef.current.scrollToIndex({
+            index,
+            animated: false,
+            viewPosition: 0.5,
           });
         }
       }, 100);
@@ -79,39 +111,28 @@ const DateOfBirthScreen = ({ navigation }) => {
 
     return (
       <View style={styles.pickerColumn}>
-        <ScrollView
-          ref={scrollRef}
-          style={styles.picker}
+        <FlatList
+          ref={flatListRef}
+          data={data}
+          renderItem={renderItem}
+          keyExtractor={(item, index) => index.toString()}
+          getItemLayout={getItemLayout}
+          showsVerticalScrollIndicator={false}
+          snapToInterval={ITEM_HEIGHT}
+          snapToAlignment="start"
+          decelerationRate={0.95}
+          onMomentumScrollEnd={handleScrollEnd}
           contentContainerStyle={{
             paddingTop: ITEM_HEIGHT * 2,
             paddingBottom: ITEM_HEIGHT * 2,
           }}
-          showsVerticalScrollIndicator={false}
-          snapToInterval={ITEM_HEIGHT}
-          snapToAlignment="center"
-          decelerationRate="fast"
-          onMomentumScrollEnd={handleScroll}
-        >
-          {data.map((item, index) => {
-            const selectedIndex = data.indexOf(selectedValue);
-            const isSelected = item === selectedValue;
-            const isAdjacent = Math.abs(index - selectedIndex) === 1;
-            
-            return (
-              <View key={index} style={styles.pickerItem}>
-                <Text
-                  style={[
-                    styles.pickerText,
-                    isSelected && styles.pickerTextSelected,
-                    isAdjacent && styles.pickerTextAdjacent
-                  ]}
-                >
-                  {formatter(item)}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
+          // Better control props
+          bounces={false}
+          scrollEventThrottle={16}
+          removeClippedSubviews={false}
+          scrollEnabled={true}
+          disableIntervalMomentum={false}
+        />
         
         {/* Selection indicator lines */}
         <View style={styles.selectionIndicator} pointerEvents="none">
@@ -138,7 +159,7 @@ const DateOfBirthScreen = ({ navigation }) => {
             days,
             selectedDay,
             setSelectedDay,
-            dayScrollRef,
+            dayFlatListRef,
             formatNumber
           )}
           
@@ -147,7 +168,7 @@ const DateOfBirthScreen = ({ navigation }) => {
             months,
             selectedMonth,
             setSelectedMonth,
-            monthScrollRef,
+            monthFlatListRef,
             formatNumber
           )}
           
@@ -156,10 +177,9 @@ const DateOfBirthScreen = ({ navigation }) => {
             years,
             selectedYear,
             setSelectedYear,
-            yearScrollRef
+            yearFlatListRef
           )}
         </View>
-        
       </View>
     </OnboardingTemplate>
   );
@@ -178,14 +198,15 @@ const styles = StyleSheet.create({
   pickerColumn: {
     flex: 1,
     position: 'relative',
-  },
-  picker: {
-    flex: 1,
+    maxWidth: '33%',
+    minWidth: 60,
   },
   pickerItem: {
     height: ITEM_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 4,
   },
   pickerText: {
     fontSize: 24,
@@ -198,16 +219,18 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: FONTS.regular,
     backgroundColor: '#1E1E1E',
-    paddingHorizontal: 16,
-    height: ITEM_HEIGHT, // Match the item height
-    textAlignVertical: 'center', // Center text vertically
-    textAlign: 'center', // Center text horizontally
-    lineHeight: ITEM_HEIGHT, // Match height for vertical centering
+    paddingHorizontal: 8,
+    height: ITEM_HEIGHT,
+    textAlignVertical: 'center',
+    textAlign: 'center',
+    lineHeight: ITEM_HEIGHT,
     borderRadius: 8,
-    overflow: 'hidden', 
+    overflow: 'hidden',
+    width: '100%',
+    minWidth: 60,
   },
   pickerTextAdjacent: {
-    color: 'rgba(255, 255, 255, 0.6)', // White with 50% opacity
+    color: 'rgba(255, 255, 255, 0.6)',
     fontWeight: '400',
     fontSize: 24,
     fontFamily: FONTS.regular,

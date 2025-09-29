@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, TouchableWithoutFeedback, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, TouchableWithoutFeedback, Modal, Alert, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
 import CustomButton from '../../constants/button';
@@ -46,7 +47,7 @@ const ReportDetails = ({ navigation, route }) => {
 
       const reportData = {
         reportedUserId: reportedUserId || null,
-        reportType: reportType,
+        reportType: reportType || 'technical_issue',
         reason: reason || 'Support Request',
         details: details.trim(),
         contactEmail: email !== 'email@gmail.com' ? email : null,
@@ -87,117 +88,123 @@ const ReportDetails = ({ navigation, route }) => {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={dismissKeyboard}>
-      <View style={styles.container}>
-        <TopHeader title="Tell us more" onBack={() => navigation.goBack()} />
-        <Text style={styles.subtitle}>
-          Please provide details to help us understand the problem.
-        </Text>
-        <TextInput
-          style={styles.input}
-          multiline
-          placeholder="Add details here"
-          placeholderTextColor="rgba(255,255,255,0.5)"
-          value={details}
-          onChangeText={setDetails}
-          returnKeyType="done"
-          blurOnSubmit={true}
-          onSubmitEditing={dismissKeyboard}
-          textAlignVertical="top"
-        />
-        <View style={styles.footerContainer}>
-          <Text style={styles.footnote}>
-            If we need more information, we'll contact you at{' '}
-            <Text style={styles.email}>{email}</Text>
+    <SafeAreaView style={styles.container}>
+      <TopHeader title="Tell us more" onBack={() => navigation.goBack()} />
+      <View style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <Text style={styles.subtitle}>
+            Please provide details to help us understand the problem.
           </Text>
-          <TouchableOpacity onPress={() => setModalVisible(true)}>
-            <Text style={styles.changeEmail}>Change email?</Text>
-          </TouchableOpacity>
-        </View>
+          <TextInput
+            style={styles.input}
+            multiline
+            placeholder="Add details here"
+            placeholderTextColor="rgba(255,255,255,0.5)"
+            value={details}
+            onChangeText={setDetails}
+            returnKeyType="done"
+            blurOnSubmit={true}
+            onSubmitEditing={dismissKeyboard}
+            textAlignVertical="top"
+          />
+          <View style={styles.footerContainer}>
+            <Text style={styles.footnote}>
+              If we need more information, we'll contact you at{' '}
+              <Text style={styles.email}>{email}</Text>
+            </Text>
+            <TouchableOpacity onPress={() => setModalVisible(true)}>
+              <Text style={styles.changeEmail}>Change email?</Text>
+            </TouchableOpacity>
+          </View>
 
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={modalVisible}
-          onRequestClose={() => setModalVisible(false)}
-        >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Change your email</Text>
-              <Text style={styles.modalSubtitle}>
-Let us know the email you’d like to use for these notifications. 
-              </Text>
-              <Text style={styles.modalSubtitle}> 
-We’ll send a confirmation link to that address to verify it’s you.
-              </Text>
-              <Text style={{fontWeight:'600', color:'#fff', marginBottom:14, fontSize:16}}> 
+          <Modal
+            animationType="slide"
+            transparent={true}
+            visible={modalVisible}
+            onRequestClose={() => setModalVisible(false)}
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Change your email</Text>
+                <Text style={styles.modalSubtitle}>
+Let us know the email you'd like to use for these notifications. 
+                </Text>
+                <Text style={styles.modalSubtitle}> 
+We'll send a confirmation link to that address to verify it's you.
+                </Text>
+                <Text style={{fontWeight:'600', color:'#fff', marginBottom:14, fontSize:16}}> 
 Email
-              </Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Enter your email address"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                value={newEmail}
-                onChangeText={setNewEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity 
-                  style={styles.modalButton} 
-                  onPress={() => setModalVisible(false)}
-                >
-                  <Text style={styles.modalButtonText}>CANCEL</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.modalButton, styles.modalButtonPrimary]} 
-                  onPress={handleEmailChange}
-                >
-                  <Text style={{ color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.medium, fontSize: 16 }}>OK</Text>
-                </TouchableOpacity>
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Enter your email address"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                  value={newEmail}
+                  onChangeText={setNewEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity 
+                    style={styles.modalButton} 
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.modalButtonText}>CANCEL</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.modalButtonPrimary]} 
+                    onPress={handleEmailChange}
+                  >
+                    <Text style={{ color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.medium, fontSize: 16 }}>OK</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        </Modal>
+          </Modal>
 
-        <View style={styles.buttonContainer}>
-          <CustomButton 
-            title={isSubmitting ? "Submitting..." : "Submit"} 
-            onPress={handleSubmit}
-            disabled={isSubmitting}
-          />
-        </View>
+          <View style={styles.buttonContainer}>
+            <CustomButton 
+              title={isSubmitting ? "Submitting..." : "Submit"} 
+              onPress={handleSubmit}
+              disabled={isSubmitting}
+            />
+          </View>
+        </ScrollView>
       </View>
-    </TouchableWithoutFeedback>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#121212',
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 32,
   },
   subtitle: {
     color: '#fff',
     fontSize: 15,
     fontFamily: FONTS.regular,
-    marginHorizontal: 20,
     marginBottom: 20,
   },
   input: {
     color: '#fff',
     fontFamily: FONTS.regular,
     fontSize: 16,
-    marginHorizontal: 20, 
-    height: '30',
+    height: 120,
     textAlignVertical: 'top',
     marginBottom: 12, 
     borderBottomWidth: 1,
     borderBottomColor: 'white',
     borderRadius: 0,
+    paddingVertical: 8,
   },
   footerContainer: {
-    marginHorizontal: 20,
+    marginBottom: 20,
   },
   footnote: {
     color: 'rgba(255,255,255,0.5)',
@@ -214,8 +221,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
   },
   buttonContainer: {
-    position: 'absolute',
-    bottom: 20,
+    marginTop: 20,
     width: '100%',
     alignItems: 'center',
   },

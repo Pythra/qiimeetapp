@@ -76,7 +76,10 @@ const PersonalityFilter = ({ navigation }) => {
             selectedTraits.length > 0 ? styles.doneButtonActive : styles.doneButtonInactive
           ]}
           activeOpacity={0.8}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            // Pass the selected personality traits back to BasicFilters
+            navigation.navigate('BasicFilters', { selectedPersonality: selectedTraits });
+          }}
         >
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>

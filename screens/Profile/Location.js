@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Image, TextInput, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Image, TextInput, ScrollView, SafeAreaView } from 'react-native';
 import TopHeader from '../../components/TopHeader';
 import { FONTS } from '../../constants/font';
 import * as Location from 'expo-location';
@@ -57,49 +57,54 @@ const LocationScreen = ({ navigation, route }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, 
+      paddingTop: 32,
+      backgroundColor: '#121212', 
+      }}>
       <TopHeader title="Location" onBack={() => navigation && navigation.goBack()} />
-      <Text style={styles.label}>Set your location</Text>
-      <TouchableOpacity style={styles.locationButton} onPress={handleGetLocation} disabled={loading}>
-        <Ionicons name="locate" size={22} color="#fff" style={{ marginRight: 8 }} />
-        <Text style={styles.locationButtonText}>{loading ? 'Getting current location...' : 'Use my current location'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.locationButton} onPress={() => setShowStates(!showStates)}>
-        <Ionicons name="map" size={22} color="#fff" style={{ marginRight: 8 }} />
-        <Text style={styles.locationButtonText}>Select state manually</Text>
-      </TouchableOpacity>
-      {showStates && (
-        <View style={styles.statesWrapper}>
-          <View style={styles.searchInputWrapper}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Type to search Nigerian states"
-              placeholderTextColor="#888"
-              value={location}
-              onChangeText={setLocation}
-            />
+      <View style={styles.container}>
+        <Text style={styles.label}>Set your location</Text>
+        <TouchableOpacity style={styles.locationButton} onPress={handleGetLocation} disabled={loading}>
+          <Ionicons name="locate" size={22} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.locationButtonText}>{loading ? 'Getting current location...' : 'Use my current location'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.locationButton} onPress={() => setShowStates(!showStates)}>
+          <Ionicons name="map" size={22} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.locationButtonText}>Select state manually</Text>
+        </TouchableOpacity>
+        {showStates && (
+          <View style={styles.statesWrapper}>
+            <View style={styles.searchInputWrapper}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Type to search Nigerian states"
+                placeholderTextColor="#888"
+                value={location}
+                onChangeText={setLocation}
+              />
+            </View>
+            <ScrollView style={styles.statesList} keyboardShouldPersistTaps="handled">
+              {filteredStates.map(state => (
+                <TouchableOpacity key={state} style={styles.stateItem} onPress={() => handleStateSelect(state)}>
+                  <Text style={styles.stateText}>{state}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
-          <ScrollView style={styles.statesList} keyboardShouldPersistTaps="handled">
-            {filteredStates.map(state => (
-              <TouchableOpacity key={state} style={styles.stateItem} onPress={() => handleStateSelect(state)}>
-                <Text style={styles.stateText}>{state}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+        )}
+        <View style={{ marginTop: 24 }}>
+          <Text style={styles.selectedLabel}>Selected location:</Text>
+          <Text style={styles.selectedValue}>{location || 'None selected'}</Text>
         </View>
-      )}
-      <View style={{ marginTop: 24 }}>
-        <Text style={styles.selectedLabel}>Selected location:</Text>
-        <Text style={styles.selectedValue}>{location || 'None selected'}</Text>
+        <TouchableOpacity
+          style={[styles.doneButton, { backgroundColor: location ? '#EC066A' : '#292929' }]}
+          disabled={!location}
+          onPress={() => navigation.navigate('EditProfile', { location })}
+        >
+          <Text style={styles.doneButtonText}>Done</Text>
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={[styles.doneButton, { backgroundColor: location ? '#EC066A' : '#292929' }]}
-        disabled={!location}
-        onPress={() => navigation.navigate('EditProfile', { location })}
-      >
-        <Text style={styles.doneButtonText}>Done</Text>
-      </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -107,7 +112,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingTop: 32,
     paddingHorizontal: 20,
   },
   label: {
@@ -127,6 +131,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   locationButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: FONTS.regular,
+  },
+  searchInputWrapper: {
+    marginBottom: 8,
+  },
+  searchInput: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     color: '#fff',
     fontSize: 16,
     fontFamily: FONTS.regular,

@@ -1,5 +1,6 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
+import WelcomeScreen from '../screens/intro/WelcomeScreen';
 import DisplayNameScreen from '../screens/intro/forms/DisplayNameScreen';
 import LookingForScreen from '../screens/intro/forms/LookingForScreen';
 import DateOfBirthScreen from '../screens/intro/forms/DateOfBirthScreen';
@@ -18,13 +19,13 @@ import LocationScreen from '../screens/intro/forms/LocationScreen';
 import DisplayInterestsScreen from '../screens/intro/forms/DisplayInterestsScreen';
 import DisplayLifestyleChoicesScreen from '../screens/intro/forms/DisplayLifestyleChoicesScreen';
 import Home from '../screens/Home/Home';
-import SignInScreen from '../screens/intro/forms/SignInScreen';
-import VerificationCodeScreen from '../screens/intro/forms/VerificationCodeScreen';
+
 
 const Stack = createStackNavigator();
 
 const OnboardingStack = () => (
   <Stack.Navigator
+    initialRouteName="Welcome"
     screenOptions={{
       headerShown: false,
       animationEnabled: false,
@@ -36,6 +37,7 @@ const OnboardingStack = () => (
       }),
     }}
   >
+    <Stack.Screen name="Welcome" component={WelcomeScreen} />
     <Stack.Screen name="DisplayName" component={DisplayNameScreen} />
     <Stack.Screen name="LookingFor" component={LookingForScreen} />
     <Stack.Screen name="DateOfBirth" component={DateOfBirthScreen} />
@@ -53,8 +55,7 @@ const OnboardingStack = () => (
     <Stack.Screen name="Location" component={LocationScreen} />
     <Stack.Screen name="DisplayInterests" component={DisplayInterestsScreen} />
     <Stack.Screen name="DisplayLifestyleChoices" component={DisplayLifestyleChoicesScreen} />
-    <Stack.Screen name="SignIn" component={SignInScreen} />
-    <Stack.Screen name="VerificationCode" component={VerificationCodeScreen} />
+
   </Stack.Navigator>
 );
 
